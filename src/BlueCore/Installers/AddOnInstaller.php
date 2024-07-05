@@ -7,7 +7,7 @@ use Composer\Installer\LibraryInstaller;
 use Composer\IO\IOInterface;
 use Composer\Plugin\PluginInterface;
 
-class AddonInstaller extends LibraryInstaller implements PluginInterface
+class AddOnInstaller extends LibraryInstaller implements PluginInterface
 {
     public function __construct(IOInterface $io, Composer $composer)
     {
