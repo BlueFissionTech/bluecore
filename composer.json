@@ -1,0 +1,48 @@
+{
+    "name": "bluefission/bluecore",
+    "description": "Blue Fission Opus Framework Core",
+    "license": "MIT",
+    "keywords": ["framework, core, bluefission, opus"],
+    "authors": [
+        {
+            "name": "Devon Scott",
+            "email": "dscott@bluefission.com",
+            "homepage": "https://bluefission.com",
+            "role": "Developer"
+        }
+    ],
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/bluefission/develation"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/bluefission/automata"
+        }
+    ],
+    "minimum-stability": "dev",
+    "require": {
+        "bluefission/develation": "^1.0.0-alpha",
+        "bluefission/automata": "dev-master",
+        "botman/botman": "^2.6",
+        "phpoffice/phppresentation": "^1.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.1@dev",
+        "php": ">=8.0.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "BlueFission\\": "src/"
+        },
+        "classmap": [
+           "src/"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": { 
+            "BlueFission\\Tests\\": "tests/" 
+        }
+    }
+}
