@@ -48,6 +48,6 @@
         }
     },
     "extra": {
-        "class": "BlueFission\\BlueCore\\Installers\\AddonInstaller"
+        "class": "BlueFission\\BlueCore\\Installers\\AddOnInstaller"
     }
 }
