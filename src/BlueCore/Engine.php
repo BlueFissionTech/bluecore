@@ -78,29 +78,29 @@ class Engine extends Application {
 	public function loadConfiguration() {
 		// Paths
 
-		$paths = require dirname( dirname( dirname( __FILE__ ) ) ).DIRECTORY_SEPARATOR.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'paths.php';
+		$paths = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'paths.php';
 
 		$this->_configurations['paths'] = $paths;
 
 		// Data
 
-		$database = require dirname( dirname( dirname( __FILE__ ) ) ).DIRECTORY_SEPARATOR.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'database.php';
+		$database = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'database.php';
 
 		$this->_configurations['database'] = $database;
 
 		// Communication
 
-		$communication = require dirname( dirname( dirname( __FILE__ ) ) ).DIRECTORY_SEPARATOR.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'communication.php';
+		$communication = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'communication.php';
 
 		$this->_configurations['communication'] = $communication;
 
 		// Natural Langauge Processing
 		
-		$grammar = require dirname( dirname( dirname( __FILE__ ) ) ).DIRECTORY_SEPARATOR.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'grammar.php';
-		$dictionary = require dirname( dirname( dirname( __FILE__ ) ) ).DIRECTORY_SEPARATOR.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'dictionary.php';
-		$roots = require dirname( dirname( dirname( __FILE__ ) ) ).DIRECTORY_SEPARATOR.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'roots.php';
-		$dialogue = require dirname( dirname( dirname( __FILE__ ) ) ).DIRECTORY_SEPARATOR.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'dialogue.php';
-		$statements = require dirname( dirname( dirname( __FILE__ ) ) ).DIRECTORY_SEPARATOR.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'statements.php';
+		$grammar = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'grammar.php';
+		$dictionary = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'dictionary.php';
+		$roots = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'roots.php';
+		$dialogue = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'dialogue.php';
+		$statements = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'statements.php';
 
 		$this->_configurations['nlp'] = [
 			'grammar' => $grammar,
@@ -112,7 +112,7 @@ class Engine extends Application {
 
 		// Application Logic
 
-		$config = require dirname( dirname( dirname( __FILE__ ) ) ).DIRECTORY_SEPARATOR.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'application.php';
+		$config = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'application.php';
 
 		$this->_configurations['app'] = $config;
 

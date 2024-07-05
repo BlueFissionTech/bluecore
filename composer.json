@@ -2,6 +2,7 @@
     "name": "bluefission/bluecore",
     "description": "Blue Fission Opus Framework Core",
     "license": "MIT",
+    "type": "composer-plugin",
     "keywords": ["framework, core, bluefission, opus"],
     "authors": [
         {
@@ -26,7 +27,8 @@
         "bluefission/develation": "^1.0.0-alpha",
         "bluefission/automata": "dev-master",
         "botman/botman": "^2.6",
-        "phpoffice/phppresentation": "^1.0"
+        "phpoffice/phppresentation": "^1.0",
+        "composer-plugin-api": "^2.0"
     },
     "require-dev": {
         "phpunit/phpunit": "^11.1@dev",
@@ -44,5 +46,8 @@
         "psr-4": { 
             "BlueFission\\Tests\\": "tests/" 
         }
+    },
+    "extra": {
+        "class": "BlueFission\\BlueCore\\Installers\\AddonInstaller"
     }
 }
