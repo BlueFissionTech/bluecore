@@ -149,31 +149,6 @@ class Engine extends Application {
 		return $this->_configurations;
 	}
 
-	public function command( $service, $behavior, $data = null, $callback = null )
-	{
-		$result = null;
-		$module = $this->_services[$service];
-		
-		// $module = instance($service);
-
-		if ( $module ) {
-			$module->message($behavior, $data);
-			$module = instance($service);
-			if (method_exists($module, 'response')) {
-				$result = $module->response();
-			} else if (method_exists($module, 'status')) {
-				$result = $module->status();
-			}
-
-			if ( $callback ) {
-				return $callback($result);
-			}
-		} else {
-			return $callback("Resource not found");
-		}
-		return;
-	}
-
 	/**
 	 * Automatically discover the mapping files and load them.
 	 * 
@@ -227,27 +202,4 @@ class Engine extends Application {
 		}
 		return $this->_themes[$name] ?? null;
 	}
-
-	public function getAbilities()
-    {
-        $abilities = [];
-
-        foreach ($this->_routes as $behaviorName => $senders) {
-
-            foreach ($senders as $senderName => $recipients) {
-            	foreach ( $recipients as $recipient ) {
-            		$service = $recipient['recipient'];
-	                if (!isset($abilities[$service])) {
-	                    $abilities[$service] = [];
-	                }
-
-	                if (!in_array($behaviorName, $abilities[$service])) {
-	                    $abilities[$service][] = $behaviorName;
-	                }
-	            }
-            }
-        }
-
-        return $abilities;
-    }
 }
