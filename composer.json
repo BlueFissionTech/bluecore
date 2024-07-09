@@ -33,6 +33,7 @@
         "bluefission/simpleclients": "dev-master",
         "composer/installers": "^1.11",
         "composer-plugin-api": "^2.0",
+        "vlucas/phpdotenv": "^5.5",
         "phpoption/phpoption": "^1.9",
         "botman/botman": "^2.6",
         "phpoffice/phppresentation": "^1.0"
