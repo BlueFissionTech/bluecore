@@ -44,17 +44,15 @@
         },
         "classmap": [
            "src/"
+        ],
+        "files": [
+            "src/Helpers/global.php",
+            "src/Helpers/response.php"
         ]
     },
     "autoload-dev": {
         "psr-4": { 
             "BlueFission\\Tests\\": "tests/" 
         }
-    },
-    "extra": {
-        "files": [
-            "src/Helpers/global.php",
-            "src/Helpers/response.php"
-        ]
     }
 }
