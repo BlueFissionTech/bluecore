@@ -60,10 +60,7 @@
         }
     },
     "extra": {
-        "class": [
-            "BlueFission\\BlueCore\\Installers\\AddOnInstaller",
-            "BlueFission\\BlueCore\\Installers\\ThemeInstaller"
-        ]
+        "class": "BlueFission\\BlueCore\\Installers\\PluginInstaller"
     },
     "config": {
         "allow-plugins": {
