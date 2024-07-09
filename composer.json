@@ -51,7 +51,7 @@
             "BlueFission\\Tests\\": "tests/" 
         }
     },
-    "extras": {
+    "extra": {
         "files": [
             "src/Helpers/global.php",
             "src/Helpers/response.php"
