@@ -54,5 +54,11 @@
         "psr-4": { 
             "BlueFission\\Tests\\": "tests/" 
         }
+    },
+    "extra": {
+        "class": [
+            "BlueFission\\BlueCore\\Installers\\AddOnInstaller",
+            "BlueFission\\BlueCore\\Installers\\ThemeInstaller"
+        ]
     }
 }
