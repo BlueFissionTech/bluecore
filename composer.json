@@ -63,5 +63,10 @@
             "BlueFission\\BlueCore\\Installers\\AddOnInstaller",
             "BlueFission\\BlueCore\\Installers\\ThemeInstaller"
         ]
+    },
+    "config": {
+        "allow-plugins": {
+            "composer/installers": true
+        }
     }
 }
