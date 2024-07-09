@@ -31,6 +31,8 @@
         "bluefission/develation": "^1.0.0-alpha",
         "bluefission/automata": "dev-master",
         "bluefission/simpleclients": "dev-master",
+        "composer/installers": "^1.11",
+        "composer-plugin-api": "^2.0",
         "botman/botman": "^2.6",
         "phpoffice/phppresentation": "^1.0"
     },
