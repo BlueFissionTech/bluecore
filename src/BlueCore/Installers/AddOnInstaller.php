@@ -6,6 +6,8 @@ use Composer\Composer;
 use Composer\Installer\LibraryInstaller;
 use Composer\IO\IOInterface;
 use Composer\Plugin\PluginInterface;
+use Composer\Repository\InstalledRepositoryInterface;
+use Composer\Package\PackageInterface;
 
 class AddOnInstaller extends LibraryInstaller implements PluginInterface
 {
@@ -14,7 +16,7 @@ class AddOnInstaller extends LibraryInstaller implements PluginInterface
         parent::__construct($io, $composer, 'opus-addon');
     }
 
-    public function getInstallPath(\Composer\Package\PackageInterface $package)
+    public function getInstallPath(PackageInterface $package)
     {
         $name = $package->getPrettyName();
         $name = preg_replace('/^bluefission\//', '', $name);
@@ -31,7 +33,7 @@ class AddOnInstaller extends LibraryInstaller implements PluginInterface
         // no-op
     }
 
-    public function uninstall(Composer $composer, IOInterface $io)
+    public function uninstall(InstalledRepositoryInterface $repo, PackageInterface $package)
     {
         // no-op
     }
