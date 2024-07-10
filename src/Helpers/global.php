@@ -1,6 +1,6 @@
 <?php
 use App\Business\Managers\CommunicationManager;
-use App\Utils\Util;
+use BlueFission\Utils\Util;
 
 if (!function_exists( 'get_site_url' )) {
 	function get_site_url( $app_id = null, $path = '', $scheme = null ) {
