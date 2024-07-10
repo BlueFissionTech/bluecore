@@ -1,6 +1,7 @@
 <?php
 use App\Business\Managers\CommunicationManager;
 use BlueFission\Utils\Util;
+use BlueFission\Str;
 
 if (!function_exists( 'get_site_url' )) {
 	function get_site_url( $app_id = null, $path = '', $scheme = null ) {
@@ -93,5 +94,23 @@ if (!function_exists('store')) {
 	function store(string $var, mixed $value = null): mixed 
 	{
 		return Util::store($var, $value);
+	}
+}
+
+if (!function_exists('csrf_token')) {
+	function csrf_token() {
+		return Util::csrfToken();
+	}
+}
+
+if (!function_exists('slugify')) {
+	function slugify(string $string): string {
+		return Str::slugify($string);
+	}
+}
+
+if (!function_exists('pluralize')) {
+	function pluralize(string $string): string {
+		return Str::pluralize($string);
 	}
 }
