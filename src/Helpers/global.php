@@ -1,5 +1,6 @@
 <?php
 use App\Business\Managers\CommunicationManager;
+use App\Utils\Util;
 
 if (!function_exists( 'get_site_url' )) {
 	function get_site_url( $app_id = null, $path = '', $scheme = null ) {
@@ -85,5 +86,12 @@ if (!function_exists('whisper')) {
 	function whisper(string $content, int $userId = null, array $attachments = [], array $parameters = [])
 	{
 	    return CommunicationManager::send($content, null, $userId, $attachments, $parameters, true);
+	}
+}
+
+if (!function_exists('store')) {
+	function store(string $var, mixed $value = null): mixed 
+	{
+		return Util::store($var, $value);
 	}
 }
