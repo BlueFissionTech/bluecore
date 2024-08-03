@@ -221,7 +221,7 @@ class UserResource extends Service
         $length = isset($args[0]) ? (int)$args[0] : 8;
 
         if ($this->authenticator->isAuthenticated()) {
-            $newPassword = Str::random($length);
+            $newPassword = Str::rand($length);
             // You can update the password for the user here
             $this->_response = "Password changed successfully. Your new password is: {$newPassword}";
         } else {
