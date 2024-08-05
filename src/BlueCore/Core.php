@@ -30,12 +30,13 @@ use BlueFission\Wise\Sys\Conn\ExtendedStdio;// as Stdio;
 use BlueFission\IPC\IPC;
 use BlueFission\Data\Queues\MemQueue;
 
-class Core {
+class Core extends Service {
 	private $_kernel;
 	private $_console;
 
 	public function __construct() {
 		$this->init();
+		parent::__construct();
 	}
 
 	public function init(): void

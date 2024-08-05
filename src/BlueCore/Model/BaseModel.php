@@ -236,6 +236,15 @@ class BaseModel extends Obj implements IData, JsonSerializable {
 	}
 
 	/**
+	 * Gets the ID field of the object.
+	 *
+	 * @return string ID field of the object.
+	 */
+	public function idField() {
+		return $this->_idField;
+	}
+
+	/**
 	 * Gets a recordset matching all data in the model
 	 *
 	 * @return mixed a collection of rows

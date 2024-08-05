@@ -168,11 +168,11 @@ if (!function_exists( 'get_template_url' )) {
  * 
  * @return string The JSON representation of the response data
  */
-function response($data) {
+function response($data, $status = 200) {
 	$response = new Response();
 
 	$response->fill($data);
-	
+	http_response_code($status);
 	header('Content-type: application/json');
 	return $response->send();
 }
