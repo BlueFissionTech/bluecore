@@ -86,7 +86,7 @@ class Core extends Service {
 		$this->_kernel->setQueueHandler( MemQueue::class );
 		
 		// Boot the kernel
-		$this->_kernel->boot()
+		$this->_kernel->boot();
 	}
 
 	public function run():void
