@@ -29,6 +29,7 @@ use BlueFission\Automata\LLM\Clients\IClient;
 use BlueFission\Wise\Sys\Conn\ExtendedStdio;// as Stdio;
 use BlueFission\IPC\IPC;
 use BlueFission\Data\Queues\MemQueue;
+use BlueFission\Services\Service;
 
 class Core extends Service {
 	private $_kernel;
