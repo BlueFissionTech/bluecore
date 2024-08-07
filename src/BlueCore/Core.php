@@ -37,7 +37,7 @@ class Core extends Service {
 
 	public function __construct() {
 		$this->init();
-		parent::__construct();
+		// parent::__construct();
 	}
 
 	public function init(): void
@@ -67,6 +67,11 @@ class Core extends Service {
 		$this->_console->setDisplayMode(Console::STATIC_MODE);
 		// $this->_console->setDisplayMode(Console::DYNAMIC_MODE);
 
+		if (Kernel::instance()) {
+			$this->_kernel = Kernel::instance();
+			return;
+		}
+
 		$grammarRules = [];
 
 		// Create and initialize the kernel
@@ -83,7 +88,7 @@ class Core extends Service {
 		);
 
 		// Set the Async handler to an appropriate driver
-		$this->_kernel->setAsyncHandler( function_exists('pcntl_fork') ? Fork::class : Thread::class );
+		$this->_kernel->setAsyncHandler( function_exists('pcntl_fork') ? Fork::class : Heap::class );
 		$this->_kernel->setQueueHandler( MemQueue::class );
 		
 		// Boot the kernel
