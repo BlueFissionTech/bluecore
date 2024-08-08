@@ -260,7 +260,7 @@ class BaseModel extends Obj implements IData, JsonSerializable {
 	 */
 	public function data() :mixed
 	{
-		$data = $this->_dataObject->data()->value();
+		$data = $this->_dataObject->data();
 		return $data;
 	}
 

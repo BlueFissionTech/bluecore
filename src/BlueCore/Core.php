@@ -37,7 +37,7 @@ class Core extends Service {
 
 	public function __construct() {
 		$this->init();
-		// parent::__construct();
+		parent::__construct();
 	}
 
 	public function init(): void
@@ -66,11 +66,6 @@ class Core extends Service {
 		$this->_console->addComponent($screen);
 		$this->_console->setDisplayMode(Console::STATIC_MODE);
 		// $this->_console->setDisplayMode(Console::DYNAMIC_MODE);
-
-		if (Kernel::instance()) {
-			$this->_kernel = Kernel::instance();
-			return;
-		}
 
 		$grammarRules = [];
 

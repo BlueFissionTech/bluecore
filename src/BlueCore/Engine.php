@@ -51,8 +51,6 @@ class Engine extends Application {
 	 */
 	public function bootstrap() {
 
-		// $this->handleRoutes();
-
 		$this->_loader = Loader::instance();
 
 		$this->dispatch('OnAppInitialized');
