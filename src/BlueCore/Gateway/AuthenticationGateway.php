@@ -3,8 +3,9 @@ namespace BlueFission\BlueCore\Gateway;
 
 use BlueFission\Services\Gateway;
 use BlueFission\Services\Request;
-use BlueFission\Data\Storage\Storage;
+use BlueFission\Data\Storage\{Session, Storage};
 use BlueFission\Services\Authenticator;
+use BlueFission\Services\Application as App;
 
 /**
  * AuthenticationGateway class for processing authentication request and managing session
@@ -33,7 +34,7 @@ class AuthenticationGateway extends Gateway {
 	 */
 	public function process( Request $request, &$arguments )
 	{
-		$auth = new Authenticator( new Storage );
+		$auth = App::makeInstance(Authenticator::class);
 
 		if ( $auth->isAuthenticated() ) {
 			$auth->setSession();
