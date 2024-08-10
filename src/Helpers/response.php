@@ -4,6 +4,7 @@
  */
 use BlueFission\HTML\Template;
 use BlueFission\Services\Response;
+use BlueFission\Net\HTTP;
 
 /**
  * Define the template function.
@@ -175,4 +176,14 @@ function response($data, $status = 200) {
 	http_response_code($status);
 	header('Content-type: application/json');
 	return $response->send();
+}
+
+/**
+ * Redirect
+ *
+ * @param string $location The location to redirect to
+ *
+ */
+function redirect($location) {
+	header('Location: '.$location);
 }
