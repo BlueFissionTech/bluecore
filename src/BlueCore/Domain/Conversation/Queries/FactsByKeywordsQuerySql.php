@@ -1,7 +1,7 @@
 <?php
 namespace BlueFission\BlueCore\Domain\Conversation\Queries;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\BlueCore\Domain\Conversation\Models\FactModel as Model;
 
 use BlueFission\BlueCore\Domain\Conversation\Queries\IFactsByKeywordsQuery;
@@ -9,7 +9,7 @@ use BlueFission\BlueCore\Domain\Conversation\Queries\IFactsByKeywordsQuery;
 class FactsByKeywordsQuerySql implements IFactsByKeywordsQuery {
 	private $_model;
 
-	public function __construct( MysqlLink $link, Model $model )
+	public function __construct( MySQLLink $link, Model $model )
 	{
 		$link->open();
 

@@ -1,12 +1,12 @@
 <?php
 namespace BlueFission\BlueCore\Datasource;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 
 /**
  * Class Delta
  *
- * This class provides a means to change and revert changes to a database using a MysqlLink connection.
+ * This class provides a means to change and revert changes to a database using a MySQLLink connection.
  *
  * @package BlueFission\BlueCore\Datasource
  */
@@ -15,9 +15,9 @@ class Delta {
 	/**
 	 * Delta constructor.
 	 *
-	 * @param MysqlLink $link A MysqlLink object representing a database connection.
+	 * @param MySQLLink $link A MySQLLink object representing a database connection.
 	 */
-	public function __construct( MysqlLink $link )
+	public function __construct( MySQLLink $link )
 	{
 		$link->open();
 	}

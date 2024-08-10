@@ -1,7 +1,7 @@
 <?php
 namespace BlueFission\BlueCore\Domain\Communication\Repositories;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\BlueCore\Repository\RepositorySql;
 use BlueFission\BlueCore\Domain\Communication\Repositories\ICommunicationChannelRepository;
 use BlueFission\BlueCore\Domain\Communication\Models\CommunicationChannelModel as Model;
@@ -11,7 +11,7 @@ class CommunicationChannelRepositorySql extends RepositorySql implements ICommun
 {
     protected $_name = "communication_channels";
 
-    public function __construct(MysqlLink $link, Model $model)
+    public function __construct(MySQLLink $link, Model $model)
     {
         parent::__construct($link, $model);
     }

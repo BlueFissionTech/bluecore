@@ -1,14 +1,14 @@
 <?php
 namespace BlueFission\BlueCore\Domain\Conversation\Queries;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\BlueCore\Domain\Conversation\Models\MessageModel as Model;
 
 class MessagesByTimestampQuerySql implements IMessagesByTimestampQuery
 {
     private $_model;
 
-    public function __construct(MysqlLink $link, Model $model)
+    public function __construct(MySQLLink $link, Model $model)
     {
         $link->open();
         $this->_model = $model;

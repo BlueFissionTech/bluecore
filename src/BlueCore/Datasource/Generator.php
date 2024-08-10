@@ -1,11 +1,11 @@
 <?php
 namespace BlueFission\BlueCore\Datasource;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 
 class Generator {
 
-	public function __construct( MysqlLink $link )
+	public function __construct( MySQLLink $link )
 	{
 		$link->open();
 	}

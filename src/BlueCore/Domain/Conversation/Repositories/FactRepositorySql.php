@@ -1,7 +1,7 @@
 <?php
 namespace BlueFission\BlueCore\Domain\Conversation\Repositories;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\BlueCore\Repository\RepositorySql;
 use BlueFission\BlueCore\Domain\Conversation\Repositories\IFactRepository;
 use BlueFission\BlueCore\Domain\Conversation\Models\FactModel as Model;
@@ -11,7 +11,7 @@ class FactRepositorySql extends RepositorySql implements IFactRepository
 {
     protected $_name = "facts";
 
-    public function __construct(MysqlLink $link, Model $model)
+    public function __construct(MySQLLink $link, Model $model)
     {
         parent::__construct($link, $model);
     }

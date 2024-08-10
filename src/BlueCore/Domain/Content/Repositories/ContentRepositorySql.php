@@ -1,7 +1,7 @@
 <?php
 namespace BlueFission\BlueCore\Domain\Content\Repositories;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\BlueCore\Repository\RepositorySql;
 use BlueFission\BlueCore\Domain\Content\Repositories\IContentRepository;
 use BlueFission\BlueCore\Domain\Content\Models\ContentModel as Model;
@@ -11,7 +11,7 @@ class ContentRepositorySql extends RepositorySql implements IContentRepository
 {
     protected $_name = "pages";
 
-    public function __construct(MysqlLink $link, Model $model)
+    public function __construct(MySQLLink $link, Model $model)
     {
         parent::__construct($link, $model);
     }

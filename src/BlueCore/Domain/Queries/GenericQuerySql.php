@@ -1,12 +1,12 @@
 <?php
 namespace BlueFission\BlueCore\Domain\Queries;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 
 class GenericQuerySql implements IGenericQuery {
     private $_model;
 
-    public function __construct(MysqlLink $link, $model)
+    public function __construct(MySQLLink $link, $model)
     {
         $link->open();
 

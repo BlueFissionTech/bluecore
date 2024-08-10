@@ -1,7 +1,7 @@
 <?php
 namespace BlueFission\BlueCore\Domain\AddOn\Repositories;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\BlueCore\Repository\RepositorySql;
 use BlueFission\BlueCore\Domain\AddOn\Repositories\IAddOnRepository;
 use BlueFission\BlueCore\Domain\AddOn\Models\AddOnModel as Model;
@@ -11,7 +11,7 @@ class AddOnRepositorySql extends RepositorySql implements IAddOnRepository
 {
     protected $_name = "addons";
 
-    public function __construct(MysqlLink $link, Model $model)
+    public function __construct(MySQLLink $link, Model $model)
     {
         parent::__construct($link, $model);
     }

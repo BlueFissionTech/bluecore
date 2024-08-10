@@ -1,14 +1,14 @@
 <?php
 namespace BlueFission\BlueCore\Domain\Repositories;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\BlueCore\Repository\RepositorySql;
 
 class GenericRepositorySql extends RepositorySql implements IGenericRepository
 {
     protected $_name;
 
-    public function __construct(MysqlLink $link, $model, $name)
+    public function __construct(MySQLLink $link, $model, $name)
     {
         parent::__construct($link, $model);
         $this->_name = $name;

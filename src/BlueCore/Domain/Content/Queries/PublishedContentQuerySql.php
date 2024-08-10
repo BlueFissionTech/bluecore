@@ -1,7 +1,7 @@
 <?php
 namespace BlueFission\BlueCore\Domain\Content\Queries;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\BlueCore\Domain\Content\Models\ContentModel as Model;
 
 use BlueFission\BlueCore\Domain\Content\Queries\IPublishedContentQuery;
@@ -9,7 +9,7 @@ use BlueFission\BlueCore\Domain\Content\Queries\IPublishedContentQuery;
 class PublishedContentQuerySql implements IPublishedContentQuery {
 	private $_model;
 
-	public function __construct( MysqlLink $link, Model $model )
+	public function __construct( MySQLLink $link, Model $model )
 	{
 		$link->open();
 

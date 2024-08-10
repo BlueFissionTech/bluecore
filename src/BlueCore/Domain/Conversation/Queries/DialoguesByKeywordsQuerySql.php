@@ -1,7 +1,7 @@
 <?php
 namespace BlueFission\BlueCore\Domain\Conversation\Queries;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\BlueCore\Domain\Conversation\Models\DialogueModel as Model;
 
 use BlueFission\BlueCore\Domain\Conversation\Queries\IDialoguesByKeywordsQuery;
@@ -9,7 +9,7 @@ use BlueFission\BlueCore\Domain\Conversation\Queries\IDialoguesByKeywordsQuery;
 class DialoguesByKeywordsQuerySql implements IDialoguesByKeywordsQuery {
 	private $_model;
 
-	public function __construct( MysqlLink $link, Model $model )
+	public function __construct( MySQLLink $link, Model $model )
 	{
 		$link->open();
 

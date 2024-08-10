@@ -1,7 +1,7 @@
 <?php
 namespace BlueFission\BlueCore\Domain\AddOn\Queries;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\BlueCore\Domain\AddOn\Models\AddOnModel as Model;
 
 use BlueFission\BlueCore\Domain\AddOn\Queries\IActivatedAddOnsQuery;
@@ -9,7 +9,7 @@ use BlueFission\BlueCore\Domain\AddOn\Queries\IActivatedAddOnsQuery;
 class ActivatedAddOnsQuerySql implements IActivatedAddOnsQuery {
 	private $_model;
 
-	public function __construct( MysqlLink $link, Model $model )
+	public function __construct( MySQLLink $link, Model $model )
 	{
 		$link->open();
 

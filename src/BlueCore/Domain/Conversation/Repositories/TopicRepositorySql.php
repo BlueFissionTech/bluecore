@@ -1,7 +1,7 @@
 <?php
 namespace BlueFission\BlueCore\Domain\Conversation\Repositories;
 
-use BlueFission\Connections\Database\MysqlLink;
+use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\BlueCore\Repository\RepositorySql;
 use BlueFission\BlueCore\Domain\Conversation\Repositories\ITopicRepository;
 use BlueFission\BlueCore\Domain\Conversation\Models\TopicModel as Model;
@@ -11,7 +11,7 @@ class TopicRepositorySql extends RepositorySql implements ITopicRepository
 {
     protected $_name = "topics";
 
-    public function __construct(MysqlLink $link, Model $model)
+    public function __construct(MySQLLink $link, Model $model)
     {
         parent::__construct($link, $model);
     }
