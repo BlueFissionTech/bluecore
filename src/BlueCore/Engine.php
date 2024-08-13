@@ -6,6 +6,7 @@ use BlueFission\Services\Service;
 use BlueFission\Services\Response;
 use BlueFission\Behavioral\Behaviors\Event;
 use BlueFission\Utils\Loader;
+use BlueFission\BlueCore\Security;
 
 /**
  * Class Engine
@@ -45,11 +46,22 @@ class Engine extends Application {
 	private $_configurations = [];
 
 	/**
+	 * The session object
+	 *
+	 * @var Session
+	 */
+	private $_session;
+
+	/**
 	 * Bootstraps the application, loading configurations and auto-discovering helpers and mappings
 	 *
 	 * @return Engine
 	 */
 	public function bootstrap() {
+
+		Security::init();
+
+		$this->_session = instance('session');
 
 		$this->_loader = Loader::instance();
 
@@ -199,5 +211,31 @@ class Engine extends Application {
 			$name = 'app/'.$name;
 		}
 		return $this->_themes[$name] ?? null;
+	}
+
+	/**
+	 * Validate the csrf token
+	 * 
+	 * @return $this
+	 */
+	public function validateCsrf()
+	{
+		if ($_SERVER['REQUEST_METHOD'] == 'POST' ) {
+			$csrf = null;
+			if ( isset($_POST['_token']) || isset($_SERVER['HTTP_X_CSRF_TOKEN'])) {
+			    $csrf = $_POST['_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'];
+			}
+
+			$token = $this->_session->field('_token');
+
+			if (!$csrf) {
+				die('Invalidateable Request');
+			} elseif (!$token) {
+				die('Invalidateable Session');
+			} elseif (!Security::verifyToken($token, $csrf)) {
+				die('Invalid Request');
+			}
+		}
+		return $this;
 	}
 }

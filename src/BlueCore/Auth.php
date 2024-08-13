@@ -15,6 +15,15 @@ class Auth extends Authenticator
 		'permissions'=>'',
 	];
 
+	public function __construct()
+	{
+		$this->_verificationFunction = function($password, $hash) {
+			return Security::verifyToken($password, $hash);
+		};
+
+		parent::__construct();
+	}
+
 	public function hasRole(string $role): bool
 	{
 	    // Assuming $this->_data['role'] stores the role of the user
