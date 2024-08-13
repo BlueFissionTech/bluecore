@@ -61,8 +61,6 @@ class Engine extends Application {
 
 		Security::init();
 
-		$this->_session = instance('session');
-
 		$this->_loader = Loader::instance();
 
 		$this->dispatch('OnAppInitialized');
@@ -76,6 +74,8 @@ class Engine extends Application {
 		$this->dispatch('OnAppLoaded');
 
 		$this->assetDir(store('asset_dir'));
+
+		$this->_session = instance('session');
 		
 		return $this;
 	}

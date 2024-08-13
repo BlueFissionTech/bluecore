@@ -1,6 +1,7 @@
 <?php
 use App\Business\Managers\CommunicationManager;
 use BlueFission\Utils\Util;
+use BlueFission\Services\Application as App;
 use BlueFission\Str;
 
 if (!function_exists( 'get_site_url' )) {
@@ -24,9 +25,9 @@ if (!function_exists( 'instance' )) {
 	function instance($serviceName = '')
 	{
 		if ( $serviceName == '' ) {
-			return \App::instance();
+			return App::instance();
 		}
-		$service = \App::instance()->service($serviceName);
+		$service = App::instance()->service($serviceName);
 		return $service;
 	}
 }
