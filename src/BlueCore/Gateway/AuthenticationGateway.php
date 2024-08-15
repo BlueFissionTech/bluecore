@@ -4,7 +4,7 @@ namespace BlueFission\BlueCore\Gateway;
 use BlueFission\Services\Gateway;
 use BlueFission\Services\Request;
 use BlueFission\Data\Storage\{Session, Storage};
-use BlueFission\Services\Authenticator;
+use BlueFission\BlueCore\Auth as Authenticator;
 use BlueFission\Services\Application as App;
 
 /**

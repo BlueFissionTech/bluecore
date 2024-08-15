@@ -3,6 +3,9 @@ namespace BlueFission\BlueCore;
 
 use BlueFission\Services\Authenticator;
 use BlueFission\Data\Storage\Storage;
+use BlueFission\BlueCore\Security;
+
+
 
 class Auth extends Authenticator
 {
@@ -19,7 +22,7 @@ class Auth extends Authenticator
 	public function __construct( Storage $session, Storage $datasource, $config = null )
 	{
 		$this->_verificationFunction = function($password, $hash) {
-			return Security::verifyToken($password, $hash);
+			return Security::verifyToken($hash, $password);
 		};
 
 		parent::__construct($session, $datasource, $config);
