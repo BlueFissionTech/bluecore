@@ -221,20 +221,16 @@ class Engine extends Application {
 	public function validateCsrf()
 	{
 		if ($_SERVER['REQUEST_METHOD'] == 'POST' ) {
-			$csrf = null;
-			if ( isset($_POST['_token']) || isset($_SERVER['HTTP_X_CSRF_TOKEN'])) {
-			    $csrf = $_POST['_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'];
-			}
+			$csrf = $_POST['_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? null;
+	        $token = store('_token');
 
-			$token = $this->_session->field('_token');
-
-			if (!$csrf) {
-				die('Invalidateable Request');
-			} elseif (!$token) {
-				die('Invalidateable Session');
-			} elseif (!Security::verifyToken($token, $csrf)) {
-				die('Invalid Request');
-			}
+	        if (!$csrf) {
+	            die('Invalid Request: Missing CSRF token');
+	        } elseif (!$token) {
+	            die('Invalid Request: Session expired or CSRF token missing');
+	        } elseif (!hash_equals($token, $csrf)) {
+	            die('Invalid Request: CSRF token mismatch');
+	        }
 		}
 		return $this;
 	}
