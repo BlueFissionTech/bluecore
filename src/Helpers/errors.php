@@ -59,7 +59,7 @@ if (!function_exists('customErrorHandler')) {
         }
 
         // Log the error to a file
-        error_log("Error: [$errno] $errstr in $errfile on line $errline", 3, OPUS_ROOT.env('ERROR_LOG_FILE', 'storage/error.log'));
+        error_log("Error: [$errno] $errstr in $errfile on line $errline", 3);
 
         /* Don't execute PHP internal error handler */
         return true;
@@ -104,7 +104,7 @@ if (!function_exists('customExceptionHandler')) {
         }
 
         // Log the exception to a file
-        error_log("Exception: " . $exception->getMessage() . " in " . $exception->getFile() . " on line " . $exception->getLine(), 3, OPUS_ROOT.env('ERROR_LOG_FILE', 'storage/error.log'));
+        error_log("Exception: " . $exception->getMessage() . " in " . $exception->getFile() . " on line " . $exception->getLine(), 3);
     }
 
     // Set custom exception handler
@@ -149,7 +149,7 @@ if (!function_exists('shutdownHandler')) {
             }
 
             // Log the fatal error
-            error_log("Fatal Error: [" . $error['type'] . "] " . $error['message'] . " in " . $error['file'] . " on line " . $error['line'], 3, OPUS_ROOT.env('ERROR_LOG_FILE', 'storage/error.log'));
+            error_log("Fatal Error: [" . $error['type'] . "] " . $error['message'] . " in " . $error['file'] . " on line " . $error['line'], 3);
         }
     }
 
