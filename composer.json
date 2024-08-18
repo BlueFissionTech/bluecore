@@ -51,7 +51,8 @@
         ],
         "files": [
             "src/Helpers/global.php",
-            "src/Helpers/response.php"
+            "src/Helpers/response.php",
+            "src/Helpers/errors.php"
         ]
     },
     "autoload-dev": {
