@@ -19,7 +19,7 @@ if (!function_exists('customErrorHandler')) {
         echo "</div>";
 
         // Optionally log the error to a file
-        error_log("Error: [$errno] $errstr in $errfile on line $errline", 3, "/path/to/your/logfile.log");
+        error_log("Error: [$errno] $errstr in $errfile on line $errline", 3, env('ERROR_LOG_FILE', 'storage/error.log'));
 
         /* Don't execute PHP internal error handler */
         return true;
@@ -41,7 +41,7 @@ if (!function_exists('customExceptionHandler')) {
         echo "</div>";
 
         // Optionally log the exception
-        error_log("Exception: " . $exception->getMessage() . " in " . $exception->getFile() . " on line " . $exception->getLine(), 3, "/path/to/your/logfile.log");
+        error_log("Exception: " . $exception->getMessage() . " in " . $exception->getFile() . " on line " . $exception->getLine(), 3, env('ERROR_LOG_FILE', 'storage/error.log'));
     }
 
     // Set custom exception handler
@@ -63,7 +63,7 @@ if (!function_exists('shutdownHandler')) {
             echo "</div>";
 
             // Optionally log the fatal error
-            error_log("Fatal Error: [" . $error['type'] . "] " . $error['message'] . " in " . $error['file'] . " on line " . $error['line'], 3, "/path/to/your/logfile.log");
+            error_log("Fatal Error: [" . $error['type'] . "] " . $error['message'] . " in " . $error['file'] . " on line " . $error['line'], 3, env('ERROR_LOG_FILE', 'storage/error.log'));
         }
     }
 
