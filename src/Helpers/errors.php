@@ -33,6 +33,7 @@ if (!function_exists('customErrorHandler')) {
             if ($isCli) {
                 // CLI output
                 echo "Error [$errno]: $errstr in $errfile on line $errline\n";
+                sourceCodeWindow($errfile, $errline);
             } else {
                 // HTML output
                 echo "<div style='background-color: $backgroundColor; color: #721c24; border: 1px solid $borderColor; padding: 20px; font-family: Arial, sans-serif;'>";
@@ -41,6 +42,7 @@ if (!function_exists('customErrorHandler')) {
                 echo "<p><strong>Message:</strong> $errstr</p>";
                 echo "<p><strong>File:</strong> $errfile</p>";
                 echo "<p><strong>Line:</strong> $errline</p>";
+                sourceCodeWindow($errfile, $errline);
                 echo "<hr>";
                 echo "<p>Please contact support or try again later.</p>";
                 echo "</div>";
@@ -79,6 +81,7 @@ if (!function_exists('customExceptionHandler')) {
             if ($isCli) {
                 // CLI output
                 echo "Exception: " . $exception->getMessage() . " in " . $exception->getFile() . " on line " . $exception->getLine() . "\n";
+                sourceCodeWindow($exception->getFile(), $exception->getLine());
             } else {
                 // HTML output
                 echo "<div style='background-color: $backgroundColor; color: #721c24; border: 1px solid $borderColor; padding: 20px; font-family: Arial, sans-serif;'>";
@@ -86,6 +89,7 @@ if (!function_exists('customExceptionHandler')) {
                 echo "<p><strong>Message:</strong> " . $exception->getMessage() . "</p>";
                 echo "<p><strong>File:</strong> " . $exception->getFile() . "</p>";
                 echo "<p><strong>Line:</strong> " . $exception->getLine() . "</p>";
+                sourceCodeWindow($exception->getFile(), $exception->getLine());
                 echo "<hr>";
                 echo "<p>Please contact support or try again later.</p>";
                 echo "</div>";
@@ -123,6 +127,7 @@ if (!function_exists('shutdownHandler')) {
                 if ($isCli) {
                     // CLI output
                     echo "Fatal Error: " . $error['message'] . " in " . $error['file'] . " on line " . $error['line'] . "\n";
+                    sourceCodeWindow($error['file'], $error['line']);
                 } else {
                     // HTML output
                     echo "<div style='background-color: $backgroundColor; color: #721c24; border: 1px solid $borderColor; padding: 20px; font-family: Arial, sans-serif;'>";
@@ -131,6 +136,7 @@ if (!function_exists('shutdownHandler')) {
                     echo "<p><strong>Message:</strong> " . $error['message'] . "</p>";
                     echo "<p><strong>File:</strong> " . $error['file'] . "</p>";
                     echo "<p><strong>Line:</strong> " . $error['line'] . "</p>";
+                    sourceCodeWindow($error['file'], $error['line']);
                     echo "<hr>";
                     echo "<p>Please contact support or try again later.</p>";
                     echo "</div>";
@@ -155,4 +161,24 @@ if (!function_exists('shutdownHandler')) {
 
     // Register shutdown function for fatal errors
     register_shutdown_function('shutdownHandler');
+}
+
+if (!function_exists('sourceCodeWindow')) {
+    function sourceCodeWindow($file, $line) {
+        $lines = file($file);
+        $start = $line - 5;
+        $end = $line + 5;
+        $start = $start < 0 ? 0 : $start;
+        $end = $end >= count($lines) ? count($lines) - 1 : $end;
+
+        echo "<pre>";
+        for ($i = $start; $i <= $end; $i++) {
+            if ($i === $line - 1) {
+                echo "<strong style='color: red;'>{$lines[$i]}</strong>";
+            } else {
+                echo $lines[$i];
+            }
+        }
+        echo "</pre>";
+    }
 }
