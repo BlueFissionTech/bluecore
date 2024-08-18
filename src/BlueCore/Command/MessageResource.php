@@ -2,11 +2,11 @@
 namespace BlueFission\Wise\Res;
 
 use BlueFission\Services\Service;
-use App\Domain\Conversation\Repositories\IMessageRepository;
-use App\Domain\Conversation\Queries\IMessagesQuery;
-use App\Domain\Conversation\Queries\IMessagesByKeywordQuery;
-use App\Domain\Conversation\Queries\IMessagesByTimestampQuery;
-use App\Domain\Conversation\Queries\IMessagesByUserIdQuery;
+use BlueFission\BlueCore\Domain\Conversation\Repositories\IMessageRepository;
+use BlueFission\BlueCore\Domain\Conversation\Queries\IMessagesQuery;
+use BlueFission\BlueCore\Domain\Conversation\Queries\IMessagesByKeywordQuery;
+use BlueFission\BlueCore\Domain\Conversation\Queries\IMessagesByTimestampQuery;
+use BlueFission\BlueCore\Domain\Conversation\Queries\IMessagesByUserIdQuery;
 
 class MessageResource extends Service
 {

@@ -304,7 +304,7 @@ class BaseModel extends Obj implements IData, JsonSerializable {
 	protected function ancestor($modelClass, $from_id_name, $on_id_name = null)
 	{
 		$model = \App::makeInstance($modelClass);
-		$id = $on_id_name ?? $from_id_name;
+		$id = $on_id_name ?? $from_id_name ?? $model->id();
 		$model->$id = $this->$from_id_name;
 		$model->read();
 		// $data = $model->data();
@@ -326,7 +326,7 @@ class BaseModel extends Obj implements IData, JsonSerializable {
 	protected function descendant($modelClass, $on_id_name, $from_id_name = null)
 	{
 		$model = \App::makeInstance($modelClass);
-		$id = $from_id_name ?? $on_id_name;
+		$id = $from_id_name ?? $on_id_name ?? $model->id();
 		$model->$on_id_name = $this->$id;
 		$model->read();
 		// $data = $model->data();
@@ -349,7 +349,7 @@ class BaseModel extends Obj implements IData, JsonSerializable {
 	{
 		// $refClass = new \ReflectionClass($modelClass);
 		$model = \App::makeInstance($modelClass);
-		$id = $from_id_name ?? $on_id_name;
+		$id = $from_id_name ?? $on_id_name ?? $model->id();
 		$model->$on_id_name = $this->$id;
 		$model->read();
 		$data = $model->result()->toArray();
@@ -371,7 +371,7 @@ class BaseModel extends Obj implements IData, JsonSerializable {
 		$model = \App::makeInstance($modelClass);
 		$pivot = \App::makeInstance($pivotClass);
 		$id1 = $from_id_name ?? $this->_idField;
-		$id2 = $to_id_name ?? $on_id_name;
+		$id2 = $to_id_name ?? $on_id_name ?? $model->id();
 		$pivot->$id1 = $this->id();
 		$pivot->read();
 
