@@ -10,7 +10,6 @@ use BlueFission\Automata\Language\EntityExtractor;
 class CommandManager extends Service {
 	protected $_grammar;
 
-
 	public function __construct(Grammar $grammar)
 	{
 		$this->_grammar = $grammar;
@@ -25,7 +24,6 @@ class CommandManager extends Service {
 			$tokens = $this->_grammar->tokenize($statement);
 			$tree = $this->_grammar->parse($tokens);
 		} catch (\Exception $e) {
-			// return false;
 			tell($e->getMessage(), 'botman');
 		}
 
