@@ -86,12 +86,6 @@ class Engine extends Application {
 	 * @return void
 	 */
 	public function loadConfiguration() {
-		// Paths
-
-		$paths = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'paths.php';
-
-		$this->_configurations['paths'] = $paths;
-
 		// Data
 
 		$database = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'database.php';
