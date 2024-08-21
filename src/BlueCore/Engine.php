@@ -98,28 +98,6 @@ class Engine extends Application {
 
 		$this->_configurations['database'] = $database;
 
-		// Communication
-
-		$communication = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'communication.php';
-
-		$this->_configurations['communication'] = $communication;
-
-		// Natural Langauge Processing
-		
-		$grammar = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'grammar.php';
-		$dictionary = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'dictionary.php';
-		$roots = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'roots.php';
-		$dialogue = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'dialogue.php';
-		$statements = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'nlp'.DIRECTORY_SEPARATOR.'statements.php';
-
-		$this->_configurations['nlp'] = [
-			'grammar' => $grammar,
-			'dictionary' => $dictionary,
-			'roots' => $roots,
-			'dialogue' => $dialogue,
-			'statements' => $statements,
-		];
-
 		// Application Logic
 
 		$config = require OPUS_ROOT.'common'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'application.php';
