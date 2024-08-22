@@ -15,11 +15,11 @@
     "repositories": [
         {
             "type": "vcs",
-            "url": "https://github.com/bluefission/develation"
+            "url": "https://github.com/bluefissiontech/develation"
         },
         {
             "type": "vcs",
-            "url": "https://github.com/bluefission/automata"
+            "url": "https://github.com/bluefissiontech/automata"
         },
         {
             "type": "vcs",
