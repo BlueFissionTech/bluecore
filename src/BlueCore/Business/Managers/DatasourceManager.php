@@ -7,10 +7,13 @@ class DatasourceManager extends Service {
 
 	private $_deltaDir = OPUS_ROOT.'/datasources/structure/';
 	private $_generatorDir = OPUS_ROOT.'/datasources/generator/';
+	private $_db = null;
 
-	public function __construct( )
+	public function __construct( MySQLLink $link, Storage $storage )
     {
 		parent::__construct();
+		$link->open();
+		$this->_db = $storage;
 	}
 
 	public function setDeltaDirectory( $directory )
@@ -23,18 +26,50 @@ class DatasourceManager extends Service {
 		$this->_generatorDir = $directory;
 	}
 
-	public function runMigrations()
+	public function runMigrations($batch = null)
 	{
+		$batch = $batch ?: 'opus';
 		$deltas = $this->loadDeltas();
+		$this->_db->config('name', 'migrations');
+					
+		$this->_db->clear();
+		$this->_db->order('iteration', 'DESC')
+			->read();
+
+		$iteration = $this->_db->result()->first()->iteration ?: 1;
+		$deltasToIgnore = $this->_db->result()->map(function($row) {
+			return $row->delta;
+		})->toArray();
+
+		$deltas = array_diff($deltas, $deltasToIgnore);
+
 		foreach ( $deltas as $delta ) {
 			$classname = '';
 			if ( strpos($delta, '.') != 0 ) {
 				$classname = $this->findClassName( $this->_deltaDir . $delta );
 				if ( $classname ) {
 					include_once($this->_deltaDir . $delta);
-					// $object = new $classname();
+					$this->_db->clear();
+					$this->_db->assign([
+						'name' => $delta,
+						'batch' => $batch,
+						'iteration' => $iteration,
+						'status' => 1
+					])->write();
+					$this->_db->id($this->_db->lastRow());
+					$status = 2;	
 					$object = \App::makeInstance($classname);
-					call_user_func([$object, 'change']);
+					try {
+						call_user_func([$object, 'change']);
+					} catch ( \Exception $e ) {
+						$status = 3;
+					}
+					$this->_db->assign([
+						'name' => $delta,
+						'batch' => $batch,
+						'iteration' => $iteration,
+						'status' => $status
+					])->write();
 				}
 			}
 		}
@@ -42,7 +77,24 @@ class DatasourceManager extends Service {
 
 	public function revertMigrations()
 	{
-		$deltas = $this->loadDeltas(1);
+		$this->_db->config('name', 'migrations');
+		$this->_db->clear();
+		$this->_db->order('iteration', 'DESC')
+			->order('migration_id', 'DESC')
+			->read();
+
+		$iteration = $this->_db->result()->first()->iteration ?: 1;
+		$batch = $this->_db->result()->map(function($row) use ($iteration) {
+			if ( $row->iteration != $iteration ) {
+				return null;
+			}
+			return $row->delta;
+		})
+		->filter(function($delta) {
+			return $delta !== null;
+		});
+
+		$deltas = $batch->count() > 0 ? $batch->toArray() : $$this->loadDeltas(1);
 		foreach ( $deltas as $delta ) {
 			$classname = '';
 			if ( strpos($delta, '.') != 0 ) {
@@ -51,7 +103,53 @@ class DatasourceManager extends Service {
 					include_once($this->_deltaDir . $delta);
 					// $object = new $classname();
 					$object = \App::makeInstance($classname);
-					call_user_func([$object, 'revert']);
+					$this->_db->clear();
+					try {
+						call_user_func([$object, 'revert']);
+					} catch ( \Exception $e ) {
+						throw new Exception("Error reverting migration: {$delta}. " . $e->getMessage());
+					} finally {
+						$this->_db->assign([
+							'name' => $delta,
+							'iteration' => $iteration,
+						])->delete();
+					}
+				}
+			}
+		}
+	}
+
+	public function revertBatch($batch)
+	{
+		$this->_db->config('name', 'migrations');
+		$this->_db->clear();
+		$this->_db->where('batch', $batch)
+			->order('iteration', 'DESC')
+			->read();
+
+		$iteration = $this->_db->result()->first()->iteration ?: 1;
+		$deltas = $this->_db->result()->map(function($row) {
+			return $row->delta;
+		})->toArray();
+
+		foreach ( $deltas as $delta ) {
+			$classname = '';
+			if ( strpos($delta, '.') != 0 ) {
+				$classname = $this->findClassName( $this->_deltaDir . $delta );
+				if ( $classname ) {
+					include_once($this->_deltaDir . $delta);
+					// $object = new $classname();
+					$object = \App::makeInstance($classname);
+					try {
+						call_user_func([$object, 'revert']);
+					} catch ( \Exception $e ) {
+						throw new Exception("Error reverting migration: {$delta}. " . $e->getMessage());
+					} finally {
+						$this->_db->assign([
+							'name' => $delta,
+							'iteration' => $iteration,
+						])->delete();
+					}
 				}
 			}
 		}

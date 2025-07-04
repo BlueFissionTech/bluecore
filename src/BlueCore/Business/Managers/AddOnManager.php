@@ -44,7 +44,7 @@ class AddOnManager extends Service
         $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
         $datasource->setGeneratorDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR);
         ob_start();
-        $datasource->runMigrations();
+        $datasource->runMigrations($name);
         $datasource->populate();
         $status .= ob_get_contents();
         ob_end_clean();
@@ -70,6 +70,8 @@ class AddOnManager extends Service
             $system = new System();
             $system->cwd(OPUS_ROOT);
             foreach ($data->libraries as $library) {
+                $library = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $library);
+                // Ensure the library name is safe and valid
                 $system->run("composer remove {$library}");
                 $status .= $system->response();
             }
@@ -79,7 +81,8 @@ class AddOnManager extends Service
         $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
         $datasource->setGeneratorDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR);
         ob_start();
-        $datasource->revertMigrations();
+        // $datasource->revertMigrations();
+        $datasource->revertBatch($addon->name);
         $status .= ob_get_contents();
         ob_end_clean();
 
