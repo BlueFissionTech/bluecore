@@ -43,6 +43,12 @@ class DatasourceManager extends Service {
 
 		$deltas = array_diff($deltas, $deltasToIgnore);
 
+		$dbActive = false;
+		if ( MySQLLink::tableExists('migrations') ) {
+			$dbActive = true;
+		}
+
+
 		foreach ( $deltas as $delta ) {
 			$classname = '';
 			if ( strpos($delta, '.') != 0 ) {
@@ -57,12 +63,16 @@ class DatasourceManager extends Service {
 						'status' => 1
 					])->write();
 					$this->_db->id($this->_db->lastRow());
-					$status = 2;	
+					$status = 2;
 					$object = \App::makeInstance($classname);
 					try {
 						call_user_func([$object, 'change']);
 					} catch ( \Exception $e ) {
 						$status = 3;
+					}
+					if ( !$dbActive ) {
+						$this->_db->activate();
+						$dbActive = true;
 					}
 					$this->_db->assign([
 						'name' => $delta,
