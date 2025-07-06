@@ -34,8 +34,9 @@ class DatasourceManager extends Service {
 	{
 		$batch = $batch ?: 'opus';
 		$deltas = $this->loadDeltas();
-		$iteration = 1;
+		$iteration = 0;
 		$storedDeltas = $this->getDeltasFromDB($iteration);
+		$iteration++;
 
 		$deltasToIgnore = (new Collection($storedDeltas))->map(function($row) {
 			return $row->delta;
@@ -47,7 +48,6 @@ class DatasourceManager extends Service {
 		if ( MySQLLink::tableExists('migrations') ) {
 			$dbActive = true;
 		}
-
 
 		foreach ( $deltas as $delta ) {
 			$classname = '';
@@ -193,6 +193,7 @@ class DatasourceManager extends Service {
 			return [];
 		}
 
+		$this->_db->activate();
 		$this->_db->clear();
 		$this->_db->order('iteration', 'DESC')
 			->order('migration_id', 'DESC')
