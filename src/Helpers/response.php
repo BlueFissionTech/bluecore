@@ -17,7 +17,9 @@ if (!function_exists( 'template' )) {
 	function template(string $themeName, string $file, array $data = []) {
 		$app = instance();
 		$theme = $app->theme($themeName);
-
+		if (!$theme) {
+			throw new \Exception("Theme '$themeName' not found.");
+		}
 
 		// $path = dirname(getcwd()).DIRECTORY_SEPARATOR.'resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR.$file;
 		// $module_path = dirname(getcwd()).DIRECTORY_SEPARATOR.'resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR.'modules';

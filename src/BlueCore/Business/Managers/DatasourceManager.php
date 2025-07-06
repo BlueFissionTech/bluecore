@@ -2,6 +2,7 @@
 namespace BlueFission\BlueCore\Business\Managers;
 
 use BlueFission\Services\Service;
+use BlueFission\Collections\Collection;
 use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\Data\Storage\Storage;
 
@@ -16,6 +17,7 @@ class DatasourceManager extends Service {
 		parent::__construct();
 		$link->open();
 		$this->_db = $storage;
+		$this->_db->config('name', 'migrations');
 	}
 
 	public function setDeltaDirectory( $directory )
@@ -32,14 +34,10 @@ class DatasourceManager extends Service {
 	{
 		$batch = $batch ?: 'opus';
 		$deltas = $this->loadDeltas();
-		$this->_db->config('name', 'migrations');
-					
-		$this->_db->clear();
-		$this->_db->order('iteration', 'DESC')
-			->read();
+		$iteration = 1;
+		$storedDeltas = $this->getDeltasFromDB($iteration);
 
-		$iteration = $this->_db->result()->first()->iteration ?: 1;
-		$deltasToIgnore = $this->_db->result()->map(function($row) {
+		$deltasToIgnore = (new Collection($storedDeltas))->map(function($row) {
 			return $row->delta;
 		})->toArray();
 
@@ -79,24 +77,13 @@ class DatasourceManager extends Service {
 
 	public function revertMigrations()
 	{
-		$this->_db->config('name', 'migrations');
-		$this->_db->clear();
-		$this->_db->order('iteration', 'DESC')
-			->order('migration_id', 'DESC')
-			->read();
+		$iteration = 1;
+		$deltas = $this->getDeltasFromDB($iteration);
 
-		$iteration = $this->_db->result()->first()->iteration ?: 1;
-		$batch = $this->_db->result()->map(function($row) use ($iteration) {
-			if ( $row->iteration != $iteration ) {
-				return null;
-			}
-			return $row->delta;
-		})
-		->filter(function($delta) {
-			return $delta !== null;
-		});
+		if ( empty($deltas) ) {
+			$deltas = $this->loadDeltas(1);
+		}
 
-		$deltas = $batch->count() > 0 ? $batch->toArray() : $$this->loadDeltas(1);
 		foreach ( $deltas as $delta ) {
 			$classname = '';
 			if ( strpos($delta, '.') != 0 ) {
@@ -188,6 +175,36 @@ class DatasourceManager extends Service {
 				}
 			}
 		}
+	}
+
+	private function getDeltasFromDB( &$iteration ): array
+	{
+		if ( !MySQLLink::tableExists('migrations') ) {
+			return [];
+		}
+
+		$this->_db->clear();
+		$this->_db->order('iteration', 'DESC')
+			->order('migration_id', 'DESC')
+			->read();
+
+		if ( $this->_db->result() && $this->_db->result()->count() > 0 ) {
+			$iteration = $this->_db->result()->first()?->iteration ?: 1;
+		}
+
+		$batch = $this->_db->result()->map(function($row) use ($iteration) {
+			if ( $row->iteration != $iteration ) {
+				return null;
+			}
+			return $row->delta;
+		})
+		->filter(function($delta) {
+			return $delta !== null;
+		});
+
+		$deltas = $batch->count() > 0 ? $batch->toArray() : [];
+
+		return $deltas;
 	}
 
 	private function loadGenerators()
