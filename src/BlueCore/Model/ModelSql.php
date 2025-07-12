@@ -3,6 +3,7 @@ namespace BlueFission\BlueCore\Model;
 
 use BlueFission\Arr;
 use BlueFission\Obj;
+use BlueFission\Behavioral\Behaviors\Event;
 use BlueFission\BlueCore\Model\BaseModel;
 use BlueFission\Data\Storage\MySQLBulk;
 use BlueFission\Connections\Database\MySQLLink;
@@ -60,6 +61,14 @@ class ModelSql extends BaseModel {
 	public function __construct( MySQLLink $link = null )
 	{
 		if ($link) {
+			$link->when(Event::ACTION_FAILED, function($event) {
+				// Handle the event when the link fails
+				throw new \Exception("Database connection failed: " . $event->context->info);
+			});
+			$link->when(Event::FAILURE, function($event) {
+				// Handle the event when the link fails
+				throw new \Exception("Database connection failed: " . $event->context->info);
+			});
 			$link->open();
 		}
 

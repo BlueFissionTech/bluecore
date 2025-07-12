@@ -38,8 +38,8 @@ class DatasourceManager extends Service {
 		$storedDeltas = $this->getDeltasFromDB($iteration);
 		$iteration++;
 
-		$deltasToIgnore = (new Collection($storedDeltas))->map(function($row) {
-			return $row->delta;
+		$deltasToIgnore = (new Collection($storedDeltas))->map(function($delta) {
+			return $delta;
 		})->toArray();
 
 		$deltas = array_diff($deltas, $deltasToIgnore);
@@ -204,10 +204,10 @@ class DatasourceManager extends Service {
 		}
 
 		$batch = $this->_db->result()->map(function($row) use ($iteration) {
-			if ( $row->iteration != $iteration ) {
+			if ( $row['iteration']!= $iteration ) {
 				return null;
 			}
-			return $row->delta;
+			return $row['name'];
 		})
 		->filter(function($delta) {
 			return $delta !== null;
