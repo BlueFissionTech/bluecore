@@ -38,11 +38,11 @@ class ProjectInstaller extends LibraryInstaller
         $overrideDirs = ['addons', 'config', 'resource', 'storage'];
 
         foreach ($overrideDirs as $dir) {
-            $rootOverride = $rootPath . DIRECTORY_SEPARATOR . $dir;
             $sourceDir = $projectPath . DIRECTORY_SEPARATOR . $dir;
+            $rootOverride = $rootPath . DIRECTORY_SEPARATOR . $dir;
 
-            if (is_dir($rootOverride)) {
-                $this->copyMerge($sourceDir, $$rootOverride);
+            if (is_dir($sourceDir)) {
+                $this->copyMerge($sourceDir, $rootOverride);
             }
         }
     }
