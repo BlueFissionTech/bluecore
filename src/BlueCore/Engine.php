@@ -93,7 +93,7 @@ class Engine extends Application {
 			// get the file name without the path
 			$filename = basename($file);
 
-			require resolve_path('common/config/'.$filename);
+			$config = require resolve_path('common/config/'.$filename);
 			if ( is_array($config) ) {
 				$this->_configurations[basename($file, '.php')] = $config;
 			}
