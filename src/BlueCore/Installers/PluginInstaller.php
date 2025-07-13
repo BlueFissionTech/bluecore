@@ -14,6 +14,7 @@ class PluginInstaller implements PluginInterface
     {
         $this->installers[] = new AddOnInstaller($io, $composer);
         $this->installers[] = new ThemeInstaller($io, $composer);
+        $this->installers[] = new ProjectInstaller($io, $composer);
 
         foreach ($this->installers as $installer) {
             $composer->getInstallationManager()->addInstaller($installer);

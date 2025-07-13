@@ -115,6 +115,23 @@ if (!function_exists('whisper')) {
 	}
 }
 
+if(!function_exists('resolve_path')) {
+	function resolve_path($pathInProject)
+	{
+	    $rootPath = rtrim(APP_ROOT, DIRECTORY_SEPARATOR);
+	    $projectPath = rtrim(PROJECT_ROOT, DIRECTORY_SEPARATOR);
+
+	    $candidate = $rootPath . DIRECTORY_SEPARATOR . $pathInProject;
+	    $fallback = $projectPath . DIRECTORY_SEPARATOR . $pathInProject;
+
+	    if (file_exists($candidate)) {
+	        return $candidate;
+	    }
+
+	    return $fallback;
+	}
+}
+
 if (!function_exists('store')) {
 	function store(string $var, mixed $value = null): mixed 
 	{

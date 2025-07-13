@@ -8,8 +8,8 @@ use BlueFission\Data\Storage\Storage;
 
 class DatasourceManager extends Service {
 
-	private $_deltaDir = OPUS_ROOT.'/datasources/structure/';
-	private $_generatorDir = OPUS_ROOT.'/datasources/generator/';
+	private $_deltaDir = APP_ROOT.'/datasources/structure/';
+	private $_generatorDir = APP_ROOT.'/datasources/generator/';
 	private $_db = null;
 
 	public function __construct( MySQLLink $link, Storage $storage )

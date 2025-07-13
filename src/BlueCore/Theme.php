@@ -13,9 +13,9 @@ class Theme
 
 		$directory = explode('/', $name)[0] ?? "";
 		$theme = explode('/', $name)[1] ?? "";
-		$appThemeDir = OPUS_ROOT.'resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR;
+		$appThemeDir = APP_ROOT.'resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR;
 
-		$addonThemeDir = OPUS_ROOT.'addons'.DIRECTORY_SEPARATOR.$directory.DIRECTORY_SEPARATOR.'resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR;
+		$addonThemeDir = APP_ROOT.'addons'.DIRECTORY_SEPARATOR.$directory.DIRECTORY_SEPARATOR.'resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR;
 
 		$path = $appThemeDir.strtolower($name).DIRECTORY_SEPARATOR;
 

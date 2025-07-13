@@ -30,7 +30,7 @@ class AddOnManager extends Service
         $status = '';
         if ($data->libraries) {
             $system = new System();
-            $system->cwd(OPUS_ROOT);
+            $system->cwd(APP_ROOT);
             foreach ($data->libraries as $library) {
                 $system->run("composer require {$library}");
                 $status .= $system->response();
@@ -38,7 +38,7 @@ class AddOnManager extends Service
         }
         $addon = new AddOn;
         $addon->assign($data);
-        $addon->path = OPUS_ROOT.'addons' . DIRECTORY_SEPARATOR . $name;
+        $addon->path = APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $name;
 
         $datasource = instance('datasource');
         $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
@@ -68,7 +68,7 @@ class AddOnManager extends Service
 
         if ($data->libraries) {
             $system = new System();
-            $system->cwd(OPUS_ROOT);
+            $system->cwd(APP_ROOT);
             foreach ($data->libraries as $library) {
                 $library = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $library);
                 // Ensure the library name is safe and valid
@@ -102,14 +102,14 @@ class AddOnManager extends Service
 
     public function showAllAddOns()
     {
-        $addOns = array_values(array_diff(scandir(OPUS_ROOT.'addons'), ['.', '..']));
+        $addOns = array_values(array_diff(scandir(APP_ROOT.'addons'), ['.', '..']));
         $list = [];
         foreach ($addOns as $addOn) {
-            $data = json_decode(file_get_contents(OPUS_ROOT.'addons' . DIRECTORY_SEPARATOR . $addOn  . DIRECTORY_SEPARATOR . 'definition.json'));
+            $data = json_decode(file_get_contents(APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $addOn  . DIRECTORY_SEPARATOR . 'definition.json'));
             $model = new AddOn;
             $model->name = $data->name ?? $addOn;
             $model->description = Str::truncate($data->description ?? "");
-            $model->path = OPUS_ROOT.'addons' . DIRECTORY_SEPARATOR . $addOn;
+            $model->path = APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $addOn;
             $model->primary_file = 'main.php';
             // $addOn = $model;
             $list[$data->name] = $model;
@@ -125,7 +125,7 @@ class AddOnManager extends Service
         foreach ($addOns as $addOn) {
             $object = new AddOn;
             $object->assign($addOn);
-            // $object->path = OPUS_ROOT.'addons' . DIRECTORY_SEPARATOR . $addOn;
+            // $object->path = APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $addOn;
             // $object->primary_file = 'main.php';
             $addOn = $object;
             $this->loadAddOn($addOn);
@@ -135,7 +135,7 @@ class AddOnManager extends Service
     protected function loadAddOn(AddOn $addOn)
     {
         $primaryFile = $addOn->path . DIRECTORY_SEPARATOR . $addOn->primary_file;
-        // $primaryFile = OPUS_ROOT.'addons' . DIRECTORY_SEPARATOR . $addon . DIRECTORY_SEPARATOR . 'main.php';
+        // $primaryFile = APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $addon . DIRECTORY_SEPARATOR . 'main.php';
         if ($primaryFile != DIRECTORY_SEPARATOR && file_exists($primaryFile)) {
             require_once($primaryFile);
         }
@@ -194,7 +194,7 @@ class AddOnManager extends Service
 
     protected function getAddOnData($name)
     {
-        $data = json_decode(file_get_contents(OPUS_ROOT.'addons' . DIRECTORY_SEPARATOR . $name  . DIRECTORY_SEPARATOR . 'definition.json'));
+        $data = json_decode(file_get_contents(APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $name  . DIRECTORY_SEPARATOR . 'definition.json'));
         return $data;
     }
 
@@ -211,7 +211,7 @@ class AddOnManager extends Service
                 array_splice( $path, 2, 0, 'logic' ); // splice in at position 2
 
                 $file = implode(DIRECTORY_SEPARATOR, $path);
-                $file = OPUS_ROOT.$file;
+                $file = APP_ROOT.$file;
             }
             if (file_exists($file)) {
                 require_once($file);
