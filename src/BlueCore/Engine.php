@@ -86,17 +86,21 @@ class Engine extends Application {
 	 * @return void
 	 */
 	public function loadConfiguration() {
-		// Data
+		// glob the config directory
+		$configFiles = glob(resolve_path('common/config/*.php'));
 
-		$database = require resolve_path('common/config/database.php');
+		foreach ( $configFiles as $file ) {
+			// get the file name without the path
+			$filename = basename($file);
 
-		$this->_configurations['database'] = $database;
+			require resolve_path('common/config/'.$filename);
+			if ( is_array($config) ) {
+				$this->_configurations[basename($file, '.php')] = $config;
+			}
+		}
 
-		// Application Logic
-
-		$config = require resolve_path('common/config/application.php');
-
-		$this->_configurations['app'] = $config;
+		// Application level settings
+		$config = $this->configuration('app');
 
 		foreach ( $config['aliases'] as $alias=>$classname ) {
 			class_alias($classname, $alias);
@@ -126,6 +130,10 @@ class Engine extends Application {
 		if ( $key && $value ) {
 			$this->_configurations[$key] = $value;
 		} elseif ( $key ) {
+			if (!isset($this->_configurations[$key]) ) {
+				throw new \Exception("Configuration key '{$key}' not found.");
+			}
+
 			return $this->_configurations[$key];
 		}
 		return $this->_configurations;
