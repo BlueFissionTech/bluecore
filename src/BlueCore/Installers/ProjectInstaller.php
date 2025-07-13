@@ -35,7 +35,7 @@ class ProjectInstaller extends LibraryInstaller
         $projectPath = $this->getInstallPath($package);
         $rootPath = dirname($projectPath); // likely the root of the current repo
 
-        $overrideDirs = ['addons', 'config', 'resource', 'storage'];
+        $overrideDirs = ['addons', 'common', 'resource', 'storage'];
 
         foreach ($overrideDirs as $dir) {
             $sourceDir = $projectPath . DIRECTORY_SEPARATOR . $dir;
@@ -43,6 +43,18 @@ class ProjectInstaller extends LibraryInstaller
 
             if (is_dir($sourceDir)) {
                 $this->copyMerge($sourceDir, $rootOverride);
+            }
+        }
+
+        $overrideFiles = ['Procfile', '.env.example', '.env', 'webpack.config.js', 'terminal', 'websocket-server.php', 'package.json'];
+
+        // Copy override files to root
+        foreach ($overrideFiles as $file) {
+            $sourceFile = $projectPath . DIRECTORY_SEPARATOR . $file;
+            $rootFile = $rootPath . DIRECTORY_SEPARATOR . $file;
+
+            if (file_exists($sourceFile)) {
+                $this->copyIfNotExists($sourceFile, $rootFile);
             }
         }
     }

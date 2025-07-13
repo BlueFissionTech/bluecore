@@ -17,8 +17,17 @@ class AddOnInstaller extends LibraryInstaller
 
     public function getInstallPath(PackageInterface $package)
     {
-        $name = $package->getPrettyName();
-        $name = preg_replace('/^bluefission\//', '', $name);
+        // Look for 'installer-name' in the 'extra' section
+        $extra = $package->getExtra();
+
+        if (!empty($extra['installer-name'])) {
+            $name = $extra['installer-name'];
+        } else {
+            // Fallback to using the package name
+            $name = $package->getPrettyName();
+            $name = preg_replace('/^bluefission\//', '', $name);
+        }
+
         return 'addons/' . $name;
     }
 
