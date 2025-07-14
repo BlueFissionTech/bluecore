@@ -8,8 +8,8 @@ use BlueFission\Data\Storage\Storage;
 
 class DatasourceManager extends Service {
 
-	private $_deltaDir = APP_ROOT.'/datasources/structure/';
-	private $_generatorDir = APP_ROOT.'/datasources/generator/';
+	private $_deltaDir = resolve_path('datasources/structure/');
+	private $_generatorDir = resolve_path('datasources/generator/');
 	private $_db = null;
 
 	public function __construct( MySQLLink $link, Storage $storage )
@@ -154,7 +154,7 @@ class DatasourceManager extends Service {
 		}
 	}
 
-	public function populate()
+	public function populate( $auto = false )
 	{
 		$generators = $this->loadGenerators();
 		if ( in_array('RootSeeder.php', $generators) ) {
@@ -181,7 +181,7 @@ class DatasourceManager extends Service {
 				if ( $classname ) {
 					include_once($this->_generatorDir . $generator);
 					$object = \App::makeInstance($classname);
-					call_user_func([$object, 'populate']);
+					call_user_func([$object, 'populate'], $auto);
 				}
 			}
 		}

@@ -38,7 +38,7 @@ class AddOnManager extends Service
         }
         $addon = new AddOn;
         $addon->assign($data);
-        $addon->path = APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $name;
+        $addon->path = resolve_path('addons' . DIRECTORY_SEPARATOR . $name);
 
         $datasource = instance('datasource');
         $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
@@ -126,14 +126,14 @@ class AddOnManager extends Service
 
     public function showAllAddOns()
     {
-        $addOns = array_values(array_diff(scandir(APP_ROOT.'addons'), ['.', '..']));
+        $addOns = array_values(array_diff(scandir(resolve_path('addons')), ['.', '..']));
         $list = [];
         foreach ($addOns as $addOn) {
-            $data = json_decode(file_get_contents(APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $addOn  . DIRECTORY_SEPARATOR . 'definition.json'));
+            $data = json_decode(file_get_contents(resolve_path('addons' . DIRECTORY_SEPARATOR . $addOn  . DIRECTORY_SEPARATOR . 'definition.json')));
             $model = new AddOn;
             $model->name = $data->name ?? $addOn;
             $model->description = Str::truncate($data->description ?? "");
-            $model->path = APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $addOn;
+            $model->path = resolve_path('addons' . DIRECTORY_SEPARATOR . $addOn);
             $model->primary_file = 'main.php';
             // $addOn = $model;
             $list[$data->name] = $model;
@@ -149,7 +149,7 @@ class AddOnManager extends Service
         foreach ($addOns as $addOn) {
             $object = new AddOn;
             $object->assign($addOn);
-            // $object->path = APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $addOn;
+            // $object->path = resolve_path('addons' . DIRECTORY_SEPARATOR . $addOn);
             // $object->primary_file = 'main.php';
             $addOn = $object;
             $this->loadAddOn($addOn);
@@ -159,7 +159,7 @@ class AddOnManager extends Service
     protected function loadAddOn(AddOn $addOn)
     {
         $primaryFile = $addOn->path . DIRECTORY_SEPARATOR . $addOn->primary_file;
-        // $primaryFile = APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $addon . DIRECTORY_SEPARATOR . 'main.php';
+        // $primaryFile = resolve_path('addons' . DIRECTORY_SEPARATOR . $addon . DIRECTORY_SEPARATOR . 'main.php');
         if ($primaryFile != DIRECTORY_SEPARATOR && file_exists($primaryFile)) {
             require_once($primaryFile);
         }
@@ -218,7 +218,7 @@ class AddOnManager extends Service
 
     protected function getAddOnData($name)
     {
-        $data = json_decode(file_get_contents(APP_ROOT.'addons' . DIRECTORY_SEPARATOR . $name  . DIRECTORY_SEPARATOR . 'definition.json'));
+        $data = json_decode(file_get_contents(resolve_path('addons' . DIRECTORY_SEPARATOR . $name  . DIRECTORY_SEPARATOR . 'definition.json')));
         return $data;
     }
 
@@ -235,7 +235,7 @@ class AddOnManager extends Service
                 array_splice( $path, 2, 0, 'logic' ); // splice in at position 2
 
                 $file = implode(DIRECTORY_SEPARATOR, $path);
-                $file = APP_ROOT.$file;
+                $file = resolve_path($file);
             }
             if (file_exists($file)) {
                 require_once($file);

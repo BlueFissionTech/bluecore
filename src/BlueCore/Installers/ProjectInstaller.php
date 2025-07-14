@@ -35,7 +35,7 @@ class ProjectInstaller extends LibraryInstaller
         $projectPath = $this->getInstallPath($package);
         $rootPath = dirname($projectPath); // likely the root of the current repo
 
-        $overrideDirs = ['addons', 'common', 'public', 'resource', 'storage'];
+        $overrideDirs = ['addons', 'common', 'public', 'resource', 'storage', 'datasources', 'mapping'];
 
         foreach ($overrideDirs as $dir) {
             $sourceDir = $projectPath . DIRECTORY_SEPARATOR . $dir;
