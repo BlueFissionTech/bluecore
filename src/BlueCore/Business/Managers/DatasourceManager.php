@@ -8,14 +8,16 @@ use BlueFission\Data\Storage\Storage;
 
 class DatasourceManager extends Service {
 
-	private $_deltaDir = resolve_path('datasources/structure/');
-	private $_generatorDir = resolve_path('datasources/generator/');
+	private $_deltaDir = '';
+	private $_generatorDir = '';
 	private $_db = null;
 
 	public function __construct( MySQLLink $link, Storage $storage )
     {
 		parent::__construct();
 		$link->open();
+		$this->_deltaDir = resolve_path('datasources/structure/');
+		$this->_generatorDir = resolve_path('datasources/generator/');
 		$this->_db = $storage;
 		$this->_db->config('name', 'migrations');
 	}
