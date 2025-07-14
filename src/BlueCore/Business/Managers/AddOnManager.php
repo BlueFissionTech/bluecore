@@ -54,6 +54,18 @@ class AddOnManager extends Service
         return $status . $this->_model->status() . $this->_model->query();
     }
 
+    public function installAll()
+    {
+        $addOns = $this->showAllAddOns();
+        $status = '';
+        foreach ($addOns as $addOn) {
+            if (!$this->_model->exists(['name' => $addOn->name])) {
+                $status .= $this->install($addOn->name);
+            }
+        }
+        return $status;
+    }
+
     public function uninstall($addOnId)
     {
         $addon = $this->getAddOnById($addOnId);
@@ -93,6 +105,18 @@ class AddOnManager extends Service
     {
         $this->_model->write(['addon_id' => $addOnId, 'is_active' => 1]);
         die($this->_model->status());
+    }
+
+    public function activateAll()
+    {
+        $addOns = $this->_model->getAllAddOns();
+        $status = '';
+        foreach ($addOns as $addOn) {
+            if (!$addOn->is_active) {
+                $status .= $this->activate($addOn->addon_id);
+            }
+        }
+        return $status;
     }
 
     public function deactivate($addOnId)
