@@ -35,6 +35,11 @@ class DatasourceManager extends Service {
 	public function runMigrations($batch = null)
 	{
 		$batch = $batch ?: 'opus';
+
+		if ( !file_exists($this->_deltaDir) ) {
+			return;
+		}
+
 		$deltas = $this->loadDeltas();
 		$iteration = 0;
 		$storedDeltas = $this->getDeltasFromDB($iteration);
@@ -91,6 +96,10 @@ class DatasourceManager extends Service {
 	{
 		$iteration = 1;
 		$deltas = $this->getDeltasFromDB($iteration);
+
+		if ( empty($deltas) && !file_exists($this->_deltaDir) ) {
+			return;
+		}
 
 		if ( empty($deltas) ) {
 			$deltas = $this->loadDeltas(1);
@@ -158,6 +167,10 @@ class DatasourceManager extends Service {
 
 	public function populate( $auto = false )
 	{
+		if (!file_exists($this->_generatorDir)) {
+			return;
+		}
+
 		$generators = $this->loadGenerators();
 		if ( in_array('RootSeeder.php', $generators) ) {
 			$classname = $this->findClassName( $this->_generatorDir . 'RootSeeder.php' );

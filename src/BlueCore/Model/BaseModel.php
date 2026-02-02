@@ -54,18 +54,18 @@ class BaseModel extends Obj implements IData, JsonSerializable {
 	 * Initializes the _dataObject as a Storage object.
      * Initializes the _elasticsearchClient as an Elasticsearch client object.
 	 */
-	public function __construct($values = null) 
+	public function __construct(Storage $storage, $values = null) 
 	{ 
 		// parent::__construct();
-		$this->assign($values);
 		// Not using dependency injection because
 		// 	These objects are necessarily coupled.
 		// This is essentially just a container for a DB object.
 		// We'll just extend new classes for new storage types;
-		$this->_dataObject = new Storage();
+		$this->_dataObject = $storage;
+		$this->_dataObject->activate();
+		$this->assign($values);
         // $this->_elasticsearchClient = ClientBuilder::fromConfig(\App::instance()->configuration('database')['elasticsearch'];
 		return $this;
-	}
 
 	/**
 	 * Generates a timestamp for the data.
