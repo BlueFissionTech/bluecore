@@ -66,6 +66,7 @@ class BaseModel extends Obj implements IData, JsonSerializable {
 		$this->assign($values);
         // $this->_elasticsearchClient = ClientBuilder::fromConfig(\App::instance()->configuration('database')['elasticsearch'];
 		return $this;
+	}
 
 	/**
 	 * Generates a timestamp for the data.
@@ -77,7 +78,7 @@ class BaseModel extends Obj implements IData, JsonSerializable {
 	{
 		$id = $this->_idField;
 
-		if (!$this->_dataObject->$id) {
+		if (!$this->_dataObject->field($id)) {
 			$this->created = date($this->_timestampFormat);
 		}
 		$this->updated = date($this->_timestampFormat);
@@ -230,7 +231,7 @@ class BaseModel extends Obj implements IData, JsonSerializable {
 	 */
 	public function id() {
 		if($this->_idField) {
-			return $this->data()[$this->_idField];
+			return $this->data()[$this->_idField] ?? null;
 		}
 		return 0;
 	}
