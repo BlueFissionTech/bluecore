@@ -28,3 +28,6 @@ Provide small, cross-platform helpers for creating directories and files safely 
 
 ## Non-goals
 - No changes to `.env`, Docker, or dependency installation.
+
+## Follow-up
+- Reconcile `ModelSQLite` with the upstream `develation` SQLite fixes after the dependency update lands in BlueCore so duplicated local behavior can be reduced or removed intentionally.
