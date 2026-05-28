@@ -2,7 +2,9 @@
 
 namespace BlueFission\Utils;
 
-class Path
+use BlueFission\Data\Directory as DevElationDirectory;
+
+class Path extends DevElationDirectory
 {
     public static function normalize($path)
     {

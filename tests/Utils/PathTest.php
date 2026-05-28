@@ -30,6 +30,11 @@ class PathTest extends TestCase
         $this->assertSame(Path::normalize($path), $normalized);
     }
 
+    public function testPathUtilityExtendsDevElationDirectory(): void
+    {
+        $this->assertTrue(is_subclass_of(Path::class, \BlueFission\Data\Directory::class));
+    }
+
     public function testEnsureDirThrowsForFilePath(): void
     {
         $filePath = File::ensureFile($this->tmpDir . DIRECTORY_SEPARATOR . 'file.txt', 'data', true);

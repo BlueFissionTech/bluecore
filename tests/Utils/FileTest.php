@@ -35,6 +35,11 @@ class FileTest extends TestCase
         $this->assertSame('second', file_get_contents($created));
     }
 
+    public function testFileUtilityExtendsDevElationFile(): void
+    {
+        $this->assertInstanceOf(\BlueFission\Data\File::class, new File());
+    }
+
     public function testWriteAtomicWritesContents(): void
     {
         $path = $this->tmpDir . DIRECTORY_SEPARATOR . 'atomic.txt';
