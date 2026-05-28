@@ -7,7 +7,7 @@ abstract class BaseGenerator implements IGenerator
     protected $outputPath;
     protected $aiCodeGenerator;
 
-    public function __construct(string $templatePath, string $outputPath, AICodeGenerator $aiCodeGenerator)
+    public function __construct(string $templatePath, string $outputPath, IAICodeGenerator $aiCodeGenerator)
     {
         $this->templatePath = $templatePath;
         $this->outputPath = $outputPath;

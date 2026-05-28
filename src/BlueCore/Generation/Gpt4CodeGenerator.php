@@ -4,7 +4,7 @@ namespace BlueFission\BlueCore\Generation;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 
-class Gpt4CodeGenerator implements AICodeGenerator
+class Gpt4CodeGenerator implements IAICodeGenerator
 {
     private $apiKey;
     private $apiUrl = 'https://api.openai.com/v1/engines/davinci-codex/completions';
@@ -16,6 +16,10 @@ class Gpt4CodeGenerator implements AICodeGenerator
 
     public function generateCode(string $template, string $userPrompt): ?string
     {
+        if (!class_exists(Client::class)) {
+            throw new \RuntimeException('Guzzle HTTP client is required to use Gpt4CodeGenerator.');
+        }
+
         $client = new Client();
 
         $prompt = "Generate PHP code for the following description:\n{$userPrompt}\n\nTemplate:\n{$template}\n\nGenerated Code:";
@@ -50,6 +54,10 @@ class Gpt4CodeGenerator implements AICodeGenerator
 
     public function generateClassName(string $userPrompt): ?string
     {
+        if (!class_exists(Client::class)) {
+            throw new \RuntimeException('Guzzle HTTP client is required to use Gpt4CodeGenerator.');
+        }
+
         $client = new Client();
 
         $prompt = "Generate a class name for the following description:\n{$userPrompt}\n\nClass Name:";

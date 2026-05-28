@@ -1,6 +1,7 @@
 <?php
+namespace BlueFission\BlueCore\Generation;
 
-class OpenAICopyGenerator implements AICopyGenerator
+class OpenAICopyGenerator implements IAICopyGenerator
 {
     protected $_llmClient;
 

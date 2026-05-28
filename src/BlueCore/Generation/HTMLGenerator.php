@@ -5,7 +5,7 @@ use BlueFission\HTML\Form;
 use BlueFission\HTML\XML;
 use BlueFission\HTML\Table;
 
-class HTMLGenerator implements IHTMLGenerator {
+class HTMLGenerator implements IHTMLGenerator, IGenerator {
     private $html;
     
     public function __construct($config = []) {
@@ -95,7 +95,12 @@ class HTMLGenerator implements IHTMLGenerator {
         return $this->html;
     }
 
-    public function generate() {
-        $this->render();
+    public function generate(string $name = '', string $prompt = '') {
+        return $this->render();
+    }
+
+    public function getType(): string
+    {
+        return 'template';
     }
 }

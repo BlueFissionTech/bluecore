@@ -1,4 +1,5 @@
 <?php
+namespace BlueFission\BlueCore\Generation;
 
 interface IAICopyGenerator
 {

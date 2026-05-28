@@ -13,6 +13,7 @@ class AdminModuleGenerator implements IGenerator
     public function generate(string $name, string $prompt): bool
     {
         // Generate an admin module for managing the data in $this->tableName  
+        return true;
     }
 
     public function getType(): string

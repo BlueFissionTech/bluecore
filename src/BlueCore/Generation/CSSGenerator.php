@@ -31,7 +31,7 @@ class CSSGenerator implements ICSSGenerator, IGenerator {
         return $this->render();
     }
 
-    public function getType() {
+    public function getType(): string {
         return 'css';
     }
 }
