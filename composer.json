@@ -44,6 +44,7 @@
         "lint": "@php scripts/lint.php",
         "test": "phpunit --do-not-cache-result tests",
         "ci": [
+            "Composer\\Config::disableProcessTimeout",
             "composer validate --no-check-publish --strict",
             "@lint",
             "@test"

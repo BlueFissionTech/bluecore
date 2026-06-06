@@ -1,6 +1,8 @@
 <?php
 namespace BlueFission\BlueCore\Generation;
 
+use BlueFission\Arr;
+
 class GeneratorFactory
 {
     private $aiCodeGenerator;
@@ -48,10 +50,12 @@ class GeneratorFactory
 
     private function configValue(array|object $config, string $key, mixed $default = null): mixed
     {
-        if (is_array($config)) {
-            return $config[$key] ?? $default;
+        $values = Arr::toArray((array)$config, true);
+
+        if (!Arr::hasKey($values, $key)) {
+            return $default;
         }
 
-        return $config->{$key} ?? $default;
+        return Arr::make($values)->get($key) ?? $default;
     }
 }

@@ -2,9 +2,9 @@
 
 namespace BlueFission\Utils;
 
-use BlueFission\Data\File as DevElationFile;
+use BlueFission\Data\File as BaseFile;
 
-class File extends DevElationFile
+class File extends BaseFile
 {
     public static function ensureFile($path, $contents = '', $overwrite = false)
     {
