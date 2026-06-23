@@ -2,6 +2,7 @@
 namespace BlueFission\BlueCore\Generation;
 
 use BlueFission\Arr;
+use BlueFission\Str;
 
 class GeneratorFactory
 {
@@ -18,7 +19,7 @@ class GeneratorFactory
     {
         $aiCodeGenerator = $this->aiCodeGenerator;
         $aiCopyGenerator = $this->aiCopyGenerator;
-        $type = strtolower($name);
+        $type = Str::lower($name);
         $templatePath = $this->configValue($config, 'templatePath', $this->configValue($config, 'template_path', ''));
         $resolvedOutputPath = $outputPath ?? $this->configValue($config, 'outputPath', $this->configValue($config, 'output_path', ''));
 
