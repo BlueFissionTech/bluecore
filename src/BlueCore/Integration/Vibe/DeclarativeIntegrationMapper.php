@@ -51,7 +51,7 @@ class DeclarativeIntegrationMapper
             $keyField = Arr::getPath($entry, 'key', Str::snake($name) . '_id');
             $fields = Arr::toArray(Arr::getPath($entry, 'fields', []), true);
             if (!Arr::has($fields, $keyField, true)) {
-                array_unshift($fields, $keyField);
+                Arr::unshift($fields, $keyField);
             }
 
             $models[] = [
@@ -116,7 +116,7 @@ class DeclarativeIntegrationMapper
 
     private function entryName(string|int $key, array $entry): string
     {
-        $name = Arr::getPath($entry, 'name', is_string($key) ? $key : '');
+        $name = Arr::getPath($entry, 'name', Str::is($key) ? $key : '');
 
         return Str::trim((string)$name);
     }
