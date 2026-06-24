@@ -7,6 +7,8 @@ require_once __DIR__ . DIRECTORY_SEPARATOR . 'bootstrap.php';
 use BlueFission\BlueCore\Generation\GeneratorFactory;
 use BlueFission\BlueCore\Generation\IAICodeGenerator;
 use BlueFission\BlueCore\Generation\IAICopyGenerator;
+use BlueFission\Str;
+use BlueFission\Val;
 use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
 
@@ -16,7 +18,7 @@ final class ExampleCodeGenerator implements IAICodeGenerator
     {
         $className = $this->generateClassName($userPrompt) ?? 'GeneratedExample';
 
-        return str_replace('ExampleClass', $className, $template);
+        return Str::replace($template, 'ExampleClass', $className);
     }
 
     public function generateClassName(string $userPrompt): ?string
@@ -34,7 +36,7 @@ final class ExampleCopyGenerator implements IAICopyGenerator
 
     public function generateImage(string $prompt): ?string
     {
-        return 'image-placeholder:' . sha1($prompt);
+        return 'image-placeholder:' . Str::encrypt($prompt, Str::SHA);
     }
 }
 
@@ -54,7 +56,7 @@ $config = (object)[
 $created = [];
 foreach (['controller', 'query', 'repository', 'scaffold', 'valueobject', 'content', 'css', 'template', 'missing'] as $name) {
     $generator = $factory->create($name, $config);
-    $created[$name] = $generator ? [
+    $created[$name] = Val::isNotNull($generator) ? [
         'class' => get_class($generator),
         'type' => $generator->getType(),
     ] : null;
@@ -69,7 +71,7 @@ $copy = $factory->create('content', $config)?->generate('copy', 'Report on month
 bluecore_example_json([
     'runtime' => Path::normalize($runtime),
     'generators' => $created,
-    'controller_generated' => $controllerGenerated === true && file_exists($generatedFile),
+    'controller_generated' => $controllerGenerated === true && (new File())->exists($generatedFile),
     'controller_file' => Path::normalize($generatedFile),
     'copy_preview' => $copy,
 ]);

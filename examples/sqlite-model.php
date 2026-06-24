@@ -5,6 +5,8 @@ declare(strict_types=1);
 require_once __DIR__ . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
 use BlueFission\BlueCore\Model\ModelSQLite;
+use BlueFission\Arr;
+use BlueFission\Str;
 use BlueFission\Utils\Path;
 
 final class ExampleTaskModel extends ModelSQLite
@@ -18,11 +20,7 @@ final class ExampleTaskModel extends ModelSQLite
 }
 
 $runtime = bluecore_example_runtime_path('sqlite-model');
-$database = $runtime . DIRECTORY_SEPARATOR . 'tasks.sqlite';
-
-if (file_exists($database)) {
-    unlink($database);
-}
+$database = $runtime . DIRECTORY_SEPARATOR . 'tasks-' . Str::rand('', 10) . '.sqlite';
 
 $tasks = new ExampleTaskModel($database);
 $tasks->write([
@@ -39,13 +37,13 @@ $tasks->write([
 $reader = new ExampleTaskModel($database);
 $reader->read();
 
-$rows = array_map(static function (array $row): array {
+$rows = Arr::make($reader->result()->toArray())->map(static function (array $row): array {
     return [
         'task_id' => (int)$row['task_id'],
         'title' => $row['title'],
         'status' => $row['status'],
     ];
-}, $reader->result()->toArray());
+})->toArray();
 
 bluecore_example_json([
     'database' => Path::normalize($database),
