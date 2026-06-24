@@ -1,6 +1,9 @@
 <?php
 namespace BlueFission\BlueCore\Generation;
 
+use BlueFission\Arr;
+use BlueFission\Str;
+use BlueFission\Val;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 
@@ -41,8 +44,9 @@ class Gpt4CodeGenerator implements IAICodeGenerator
 
             $responseBody = json_decode($response->getBody(), true);
 
-            if (isset($responseBody['choices'][0]['text'])) {
-                return trim($responseBody['choices'][0]['text']);
+            $text = Arr::getPath($responseBody, ['choices', 0, 'text']);
+            if (Val::isNotEmpty($text)) {
+                return Str::trim($text);
             }
 
         } catch (RequestException $e) {
@@ -79,8 +83,9 @@ class Gpt4CodeGenerator implements IAICodeGenerator
 
             $responseBody = json_decode($response->getBody(), true);
 
-            if (isset($responseBody['choices'][0]['text'])) {
-                return trim($responseBody['choices'][0]['text']);
+            $text = Arr::getPath($responseBody, ['choices', 0, 'text']);
+            if (Val::isNotEmpty($text)) {
+                return Str::trim($text);
             }
 
         } catch (RequestException $e) {

@@ -1,6 +1,8 @@
 <?php
 namespace BlueFission\BlueCore\Generation;
 
+use BlueFission\Str;
+
 class ValueObjectGenerator extends BaseGenerator
 {
     public function getType(): string
@@ -13,7 +15,7 @@ class ValueObjectGenerator extends BaseGenerator
         $valueObjectCode = '';
 
         foreach ($headers as $header) {
-            $propertyName = strtolower($header);
+            $propertyName = Str::lower($header);
             $valueObjectCode .= "\tpublic \${$propertyName};\n";
         }
 
