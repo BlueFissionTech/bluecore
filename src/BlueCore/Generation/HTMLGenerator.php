@@ -1,9 +1,12 @@
 <?php
 namespace BlueFission\BlueCore\Generation;
 
+use BlueFission\Arr;
 use BlueFission\HTML\Form;
 use BlueFission\HTML\XML;
 use BlueFission\HTML\Table;
+use BlueFission\Str;
+use BlueFission\Val;
 
 class HTMLGenerator implements IHTMLGenerator, IGenerator {
     private $html;
@@ -44,20 +47,21 @@ class HTMLGenerator implements IHTMLGenerator, IGenerator {
     }
         
     public function addForm($data, $action = '', $method = 'POST') {
-        $formHTML = Form::open($action, $name, $method);
+        $formName = 'generated-form';
+        $formHTML = Form::open($action, $formName, $method);
+        $output = '';
         
         foreach ($data as $name => $value) {
-            $label = ucfirst(str_replace('_', ' ', $name));
+            $label = Str::capitalize(Str::replace($name, '_', ' '));
             $type = 'text';
 
-            // Check for specific field types
-            if (strpos($name, 'email') !== false) {
+            if (Str::contains($name, 'email')) {
                 $type = 'email';
-            } elseif (strpos($name, 'password') !== false) {
+            } elseif (Str::contains($name, 'password')) {
                 $type = 'password';
-            } elseif (strpos($name, 'date') !== false) {
+            } elseif (Str::contains($name, 'date')) {
                 $type = 'date';
-            } elseif (strpos($name, 'time') !== false) {
+            } elseif (Str::contains($name, 'time')) {
                 $type = 'time';
             }
 
@@ -78,13 +82,14 @@ class HTMLGenerator implements IHTMLGenerator, IGenerator {
     public function addData($data) {
         // recursively build HTML from data array
         foreach ($data as $tag) {
-            $tag_name = isset($tag['name']) ? $tag['name'] : '';
-            $tag_attrs = isset($tag['attrs']) ? $tag['attrs'] : [];
-            $tag_content = isset($tag['content']) ? $tag['content'] : '';
-            if ($tag_name) {
+            $tag = Arr::toArray($tag, true);
+            $tag_name = Arr::make($tag)->get('name') ?? '';
+            $tag_attrs = Arr::make($tag)->get('attrs') ?? [];
+            $tag_content = Arr::make($tag)->get('content') ?? '';
+            if (Val::isNotEmpty($tag_name)) {
                 $this->addElement($tag_name, $tag_attrs, $tag_content);
-                if (isset($tag['child'])) {
-                    $this->addData($tag['child']);
+                if (Arr::hasKey($tag, 'child')) {
+                    $this->addData(Arr::make($tag)->get('child'));
                 }
             }
         }

@@ -3,22 +3,24 @@
 namespace BlueFission\Utils;
 
 use BlueFission\Data\File as BaseFile;
+use BlueFission\Flag;
+use BlueFission\Val;
 
 class File extends BaseFile
 {
     public static function ensureFile($path, $contents = '', $overwrite = false)
     {
         $normalized = Path::normalize($path);
-        if ($normalized === '') {
+        if (Val::isEmpty($normalized)) {
             throw new \InvalidArgumentException('Path cannot be empty.');
         }
 
-        $dir = dirname($normalized);
-        if ($dir && $dir !== '.' && $dir !== DIRECTORY_SEPARATOR) {
+        $dir = Path::parentPath($normalized);
+        if (Val::isNotEmpty($dir) && $dir !== '.' && $dir !== DIRECTORY_SEPARATOR) {
             Path::ensureDir($dir);
         }
 
-        if (file_exists($normalized) && !$overwrite) {
+        if ((new static())->exists($normalized) && Flag::isFalse($overwrite)) {
             return $normalized;
         }
 
@@ -32,12 +34,12 @@ class File extends BaseFile
     public static function writeAtomic($path, $contents)
     {
         $normalized = Path::normalize($path);
-        if ($normalized === '') {
+        if (Val::isEmpty($normalized)) {
             throw new \InvalidArgumentException('Path cannot be empty.');
         }
 
-        $dir = dirname($normalized);
-        if ($dir && $dir !== '.' && $dir !== DIRECTORY_SEPARATOR) {
+        $dir = Path::parentPath($normalized);
+        if (Val::isNotEmpty($dir) && $dir !== '.' && $dir !== DIRECTORY_SEPARATOR) {
             Path::ensureDir($dir);
         }
 
@@ -60,5 +62,24 @@ class File extends BaseFile
         }
 
         return $normalized;
+    }
+
+    public static function readContents($path): string
+    {
+        $normalized = Path::normalize($path);
+        if (Val::isEmpty($normalized)) {
+            throw new \InvalidArgumentException('Path cannot be empty.');
+        }
+
+        if (!(new static())->isReachable($normalized)) {
+            throw new \RuntimeException("Unable to read file: {$normalized}");
+        }
+
+        $contents = file_get_contents($normalized);
+        if ($contents === false) {
+            throw new \RuntimeException("Unable to read file: {$normalized}");
+        }
+
+        return $contents;
     }
 }

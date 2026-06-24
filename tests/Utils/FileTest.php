@@ -26,13 +26,13 @@ class FileTest extends TestCase
 
         $created = File::ensureFile($path, 'first');
         $this->assertFileExists($created);
-        $this->assertSame('first', file_get_contents($created));
+        $this->assertSame('first', File::readContents($created));
 
         File::ensureFile($path, 'second');
-        $this->assertSame('first', file_get_contents($created));
+        $this->assertSame('first', File::readContents($created));
 
         File::ensureFile($path, 'second', true);
-        $this->assertSame('second', file_get_contents($created));
+        $this->assertSame('second', File::readContents($created));
     }
 
     public function testFileUtilityExtendsDevElationFile(): void
@@ -45,10 +45,10 @@ class FileTest extends TestCase
         $path = $this->tmpDir . DIRECTORY_SEPARATOR . 'atomic.txt';
 
         File::writeAtomic($path, 'hello');
-        $this->assertSame('hello', file_get_contents($path));
+        $this->assertSame('hello', File::readContents($path));
 
         File::writeAtomic($path, 'world');
-        $this->assertSame('world', file_get_contents($path));
+        $this->assertSame('world', File::readContents($path));
     }
 
     private function removeDir($dir): void

@@ -3,37 +3,45 @@
 namespace BlueFission\Utils;
 
 use BlueFission\Data\Directory;
+use BlueFission\Str;
+use BlueFission\Val;
 
 class Path extends Directory
 {
     public static function normalize($path)
     {
-        if ($path === null) {
+        if (Val::isNull($path)) {
             return '';
         }
 
         $path = (string)$path;
-        if ($path === '') {
+        if (Val::isEmpty($path)) {
             return '';
         }
 
-        $path = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path);
+        $path = Str::replace($path, '/', DIRECTORY_SEPARATOR);
+        $path = Str::replace($path, '\\', DIRECTORY_SEPARATOR);
 
-        $isUnc = (DIRECTORY_SEPARATOR === '\\' && strpos($path, '\\\\') === 0);
+        $isUnc = (DIRECTORY_SEPARATOR === '\\' && Str::startsWith($path, '\\\\'));
         $separator = preg_quote(DIRECTORY_SEPARATOR, '#');
-        $path = preg_replace('#' . $separator . '+#', DIRECTORY_SEPARATOR, $path);
+        $path = Str::replacePattern($path, '#' . $separator . '+#', DIRECTORY_SEPARATOR);
 
         if ($isUnc) {
-            $path = '\\\\' . ltrim($path, '\\');
+            $path = '\\\\' . Str::trim($path, '\\');
         }
 
         return $path;
     }
 
+    public static function parentPath($path)
+    {
+        return dirname(self::normalize($path));
+    }
+
     public static function ensureDir($path, $mode = 0775, $recursive = true)
     {
         $normalized = self::normalize($path);
-        if ($normalized === '') {
+        if (Val::isEmpty($normalized)) {
             throw new \InvalidArgumentException('Path cannot be empty.');
         }
 

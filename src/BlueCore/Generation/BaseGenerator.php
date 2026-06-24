@@ -1,6 +1,11 @@
 <?php
 namespace BlueFission\BlueCore\Generation;
 
+use BlueFission\Str;
+use BlueFission\Utils\File;
+use BlueFission\Utils\Path;
+use BlueFission\Val;
+
 abstract class BaseGenerator implements IGenerator
 {
     protected $templatePath;
@@ -16,15 +21,15 @@ abstract class BaseGenerator implements IGenerator
 
     public function generate(string $name, string $userPrompt): bool
     {
-        $template = file_get_contents($this->templatePath);
+        $template = File::readContents($this->templatePath);
 
         $generatedCode = $this->generateCodeFromAI($template, $userPrompt);
-        if (!$generatedCode) {
+        if (Val::isEmpty($generatedCode)) {
             return false;
         }
 
         $outputFile = $this->getOutputFile($name);
-        return file_put_contents($outputFile, $generatedCode) !== false;
+        return File::writeAtomic($outputFile, $generatedCode) === Path::normalize($outputFile);
     }
 
     protected function generateClassName(string $userPrompt): string
@@ -33,7 +38,7 @@ abstract class BaseGenerator implements IGenerator
         $name = $this->extractClassNameFromUserPrompt($userPrompt);
 
         // If unable to determine a name, request an AI-generated name
-        if (empty($name)) {
+        if (Val::isEmpty($name)) {
             $name = $this->requestAIGeneratedClassName($userPrompt);
         }
 
@@ -42,8 +47,9 @@ abstract class BaseGenerator implements IGenerator
 
     protected function extractClassNameFromUserPrompt(string $userPrompt): ?string
 	{
-	    if (preg_match('/\b(create|build)\s+(a|an)\s+(?<type>\w+)\s+(?<name>\w+)/i', $userPrompt, $matches)) {
-	        return ucfirst($matches['name']) . ucfirst($matches['type']);
+        $matches = Str::matchPattern($userPrompt, '/\b(create|build)\s+(a|an)\s+(?<type>\w+)\s+(?<name>\w+)/i');
+	    if ($matches) {
+	        return Str::capitalize($matches['name']) . Str::capitalize($matches['type']);
 	    }
 
 	    return null;
@@ -53,8 +59,8 @@ abstract class BaseGenerator implements IGenerator
 	{
 	    $generatedName = $this->aiCodeGenerator->generateClassName($userPrompt);
 
-        if (empty($generatedName)) {
-            return 'Untitled' . ucfirst($this->getType());
+        if (Val::isEmpty($generatedName)) {
+            return 'Untitled' . Str::capitalize($this->getType());
         }
 
         return $generatedName;
