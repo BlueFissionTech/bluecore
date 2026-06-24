@@ -58,7 +58,7 @@ class DeclarativeIntegrationMapper
                 'name' => $name,
                 'backend' => $backend,
                 'class' => $backend === 'sql' || $backend === 'mysql' ? ModelSql::class : ModelSQLite::class,
-                'table' => Arr::getPath($entry, 'table', Str::pluralize(Str::snake($name))),
+                'table' => Arr::getPath($entry, 'table', Str::make($name)->pluralize()->snake()->val(),
                 'key' => $keyField,
                 'fields' => $fields,
             ];
