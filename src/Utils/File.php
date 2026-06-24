@@ -3,6 +3,7 @@
 namespace BlueFission\Utils;
 
 use BlueFission\Data\File as BaseFile;
+use BlueFission\Arr;
 use BlueFission\Flag;
 use BlueFission\Val;
 
@@ -81,5 +82,67 @@ class File extends BaseFile
         }
 
         return $contents;
+    }
+
+    public static function readiness($path, bool $includeHash = false): array
+    {
+        $normalized = Path::normalize($path);
+        $exists = Val::isNotEmpty($normalized) && is_file($normalized);
+        $readable = $exists && is_readable($normalized);
+        $writable = $exists
+            ? is_writable($normalized)
+            : self::parentIsWritable($normalized);
+
+        $result = [
+            'normalizedPath' => $normalized,
+            'expectedType' => 'file',
+            'exists' => Flag::parseBool($exists),
+            'readable' => Flag::parseBool($readable),
+            'writable' => Flag::parseBool($writable),
+            'reason' => self::readinessReason($normalized, $exists, $readable, $writable),
+            'hash' => null,
+        ];
+
+        if (Flag::parseBool($includeHash) && Flag::parseBool($readable)) {
+            $result['hash'] = hash_file('sha256', $normalized) ?: null;
+        }
+
+        return Arr::make($result)->toArray();
+    }
+
+    private static function parentIsWritable(string $path): bool
+    {
+        if (Val::isEmpty($path)) {
+            return false;
+        }
+
+        $dir = Path::parentPath($path);
+
+        return Val::isNotEmpty($dir) && is_dir($dir) && is_writable($dir);
+    }
+
+    private static function readinessReason(string $path, bool $exists, bool $readable, bool $writable): ?string
+    {
+        if (Val::isEmpty($path)) {
+            return 'invalid_path';
+        }
+
+        if (file_exists($path) && !$exists) {
+            return 'not_file';
+        }
+
+        if (!$exists) {
+            return self::parentIsWritable($path) ? 'missing' : 'parent_unavailable';
+        }
+
+        if (!$readable) {
+            return 'unreadable';
+        }
+
+        if (!$writable) {
+            return 'unwritable';
+        }
+
+        return null;
     }
 }
