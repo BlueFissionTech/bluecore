@@ -51,14 +51,14 @@ class DeclarativeIntegrationMapper
             $keyField = Arr::getPath($entry, 'key', Str::snake($name) . '_id');
             $fields = Arr::toArray(Arr::getPath($entry, 'fields', []), true);
             if (!Arr::has($fields, $keyField, true)) {
-                Arr::unshift($fields, $keyField);
+                $fields = Arr::unshift($fields, $keyField);
             }
 
             $models[] = [
                 'name' => $name,
                 'backend' => $backend,
                 'class' => $backend === 'sql' || $backend === 'mysql' ? ModelSql::class : ModelSQLite::class,
-                'table' => Arr::getPath($entry, 'table', Str::make($name)->pluralize()->snake()->val()),
+                'table' => Arr::getPath($entry, 'table', $this->tableName($name)),
                 'key' => $keyField,
                 'fields' => $fields,
             ];
@@ -112,6 +112,11 @@ class DeclarativeIntegrationMapper
         }
 
         return [];
+    }
+
+    private function tableName(string $name): string
+    {
+        return Str::snake(Str::pluralize($name));
     }
 
     private function entryName(string|int $key, array $entry): string
