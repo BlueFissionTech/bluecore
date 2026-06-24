@@ -5,6 +5,11 @@
 use BlueFission\HTML\Template;
 use BlueFission\Services\Response;
 use BlueFission\Net\HTTP;
+use BlueFission\Arr;
+use BlueFission\Str;
+use BlueFission\Val;
+use BlueFission\Utils\File;
+use BlueFission\Utils\Path;
 
 /**
  * Define the template function.
@@ -74,36 +79,71 @@ if (!function_exists( 'get_template' )) {
  */
 if (!function_exists( 'get_template_path' )) {
 	function get_template_path( $file ) {
-		$__file = func_get_arg(0);
-		$trace = debug_backtrace();
-		$caller_info = end($trace);
-		$dir = dirname($caller_info['file']);
-		// TODO: Make this more resilent against including files from and included custom directory
-		// $template_dir = __DIR__. ( strpos(__DIR__, '/markup') ? "/" : "/markup/" );
-		$template_dir = $dir;
+		$template_dir = template_base_dir(template_caller_dir());
+		$file = template_safe_file($file);
+		$custom = Path::normalize($template_dir . DIRECTORY_SEPARATOR . 'custom' . DIRECTORY_SEPARATOR . $file);
 
-		// Check if the current directory contains the /markup/custom directory
-		if ( strpos($dir, '/markup/custom') ) {
-			$template_dir = str_replace('/markup/custom', '/markup', $template_dir);
-		} elseif ( !strpos($dir, '/markup') ) {
-			// $template_dir .= '/markup';
-			$template_dir = dirname(getcwd()).DIRECTORY_SEPARATOR.'resource'.DIRECTORY_SEPARATOR.'markup';
+		if ((new File())->exists($custom)) {
+		    return $custom;
 		}
 
-		// Initialize the $template variable with an empty string
-		$template = "";
+		return Path::normalize($template_dir . DIRECTORY_SEPARATOR . $file);
+	}
+}
 
-		// Check if the file exists in the custom directory
-		if(file_exists($template_dir.'/custom/'.$__file)) {
-		    // If it exists, set the $template to the path of the file in the custom directory
-		    $template = $template_dir.'/custom/'.$__file;
-		} else {
-		    // If it doesn't exist, set the $template to the path of the file in the main directory
-		    $template = $template_dir.'/'.$__file;
+if (!function_exists('template_caller_dir')) {
+	function template_caller_dir(): string
+	{
+		$trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
+		foreach ($trace as $frame) {
+			$file = $frame['file'] ?? '';
+			if (Val::isNotEmpty($file) && Path::normalize($file) !== Path::normalize(__FILE__)) {
+				return dirname($file);
+			}
 		}
 
-		// Return the final value of $template
-		return $template;
+		return getcwd();
+	}
+}
+
+if (!function_exists('template_base_dir')) {
+	function template_base_dir(string $callerDir): string
+	{
+		$dir = Path::normalize($callerDir);
+		$segments = Arr::toArray(Str::split($dir, DIRECTORY_SEPARATOR), true);
+		$markupIndex = array_search('markup', $segments, true);
+
+		if ($markupIndex !== false) {
+			$baseSegments = Arr::make($segments)
+				->slice(0, $markupIndex + 1);
+
+			return Path::normalize(implode(DIRECTORY_SEPARATOR, $baseSegments));
+		}
+
+		return Path::normalize(resolve_path('resource' . DIRECTORY_SEPARATOR . 'markup'));
+	}
+}
+
+if (!function_exists('template_safe_file')) {
+	function template_safe_file(string $file): string
+	{
+		$normalized = Path::normalize($file);
+		if (Val::isEmpty($normalized)) {
+			throw new \InvalidArgumentException('Template file cannot be empty.');
+		}
+
+		if (preg_match('#^(?:[A-Za-z]:)?[\\\\/]#', $normalized) === 1) {
+			throw new \InvalidArgumentException('Template file must be relative.');
+		}
+
+		$segments = Arr::toArray(Str::split($normalized, DIRECTORY_SEPARATOR), true);
+		foreach ($segments as $segment) {
+			if (Val::isEmpty($segment) || $segment === '..') {
+				throw new \InvalidArgumentException('Template file cannot contain traversal segments.');
+			}
+		}
+
+		return Path::normalize(implode(DIRECTORY_SEPARATOR, $segments));
 	}
 }
 
@@ -135,32 +175,12 @@ if (!function_exists( 'get_template_url' )) {
 	 * @return string The URL of the template file
 	 */
 	function get_template_url( $file ) {
-		$__file = func_get_arg(0);
-		$trace = debug_backtrace();
-		$caller_info = end($trace);
-		$dir = dirname($caller_info['file']);
-		$template_dir = $dir;
+		$template = get_template_path($file);
+		$siteRoot = defined('SITE_ROOT') ? Path::normalize(SITE_ROOT) : Path::normalize(getcwd());
+		$url = Str::replace($template, $siteRoot, '');
+		$url = Str::replace(Path::normalize($url), DIRECTORY_SEPARATOR, '/');
 
-		// Check if the directory contains "/markup/custom"
-		if ( strpos($dir, '/markup/custom') ) {
-			$template_dir = str_replace('/markup/custom', '/markup', $template_dir);
-		} 
-		// Check if the directory contains "/markup"
-		elseif ( !strpos($dir, '/markup') ) {
-			$template_dir = dirname(getcwd()).DIRECTORY_SEPARATOR.'resource'.DIRECTORY_SEPARATOR.'markup';
-		}
-
-		$template_url = str_replace(SITE_ROOT, '', $dir).'/markup';
-
-		$url = "";
-		// Check if a custom version of the template file exists
-		if(file_exists($template_dir.'/custom/'.$__file)) {
-			$url = $template_url.'/custom/'.$__file;
-		} else {
-			$url = $template_url.'/'.$__file;
-		}
-
-		return $url;
+		return '/' . ltrim($url, '/');
 	}
 }
 
