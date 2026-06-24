@@ -1,6 +1,7 @@
 <?php
 namespace BlueFission\BlueCore;
 
+use BlueFission\Arr;
 use BlueFission\Services\Authenticator;
 use BlueFission\Data\Storage\Storage;
 use BlueFission\BlueCore\Security;
@@ -42,7 +43,8 @@ class Auth extends Authenticator
 
 	public function hasPermission(string $permission): bool
 	{
-	    // Assuming $this->_data['permissions'] is an array of permissions
-	    return in_array($permission, $this->_data['permissions']);
+	    $permissions = Arr::toArray($this->_data['permissions'] ?? [], true);
+
+	    return Arr::has($permissions, $permission, true);
 	}
 }

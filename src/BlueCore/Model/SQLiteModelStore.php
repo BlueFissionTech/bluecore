@@ -2,7 +2,9 @@
 
 namespace BlueFission\BlueCore\Model;
 
+use BlueFission\Arr;
 use BlueFission\Collections\Group;
+use BlueFission\Str;
 
 class SQLiteModelStore
 {
@@ -41,9 +43,9 @@ class SQLiteModelStore
             return $this->_config;
         }
 
-        if (is_array($config)) {
+        if (Arr::is($config)) {
             foreach ($config as $key => $item) {
-                if (array_key_exists($key, $this->_config)) {
+                if (Arr::hasKey($this->_config, $key)) {
                     $this->_config[$key] = $item;
                 }
             }
@@ -55,7 +57,7 @@ class SQLiteModelStore
             return $this->_config[$config] ?? null;
         }
 
-        if (array_key_exists($config, $this->_config)) {
+        if (Arr::hasKey($this->_config, $config)) {
             $this->_config[$config] = $value;
         }
 
@@ -101,7 +103,7 @@ class SQLiteModelStore
 
     public function order($field, $direction = 'ASC')
     {
-        $this->_order[$field] = strtoupper($direction) === 'DESC' ? 'DESC' : 'ASC';
+        $this->_order[$field] = Str::match($direction, 'DESC', Str::IGNORE_CASE) ? 'DESC' : 'ASC';
 
         return $this;
     }
@@ -311,7 +313,7 @@ class SQLiteModelStore
             if (!$type) {
                 $type = $field === $key
                     ? 'INTEGER PRIMARY KEY AUTOINCREMENT'
-                    : (in_array($field, ['created', 'updated', 'date'], true) ? 'DATETIME' : 'TEXT');
+                    : (Arr::has(['created', 'updated', 'date'], $field, true) ? 'DATETIME' : 'TEXT');
             }
             $columns[] = sprintf('`%s` %s', $field, $type);
         }
