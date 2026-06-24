@@ -3,9 +3,31 @@ namespace BlueFission\BlueCore\Generation;
 
 use BlueFission\Arr;
 use BlueFission\Str;
+use BlueFission\Val;
 
 class GeneratorFactory
 {
+    private const SUPPORTED_TYPES = [
+        'controller',
+        'module',
+        'query',
+        'repository',
+        'scaffold',
+        'valueobject',
+        'content',
+        'admin_module',
+        'css',
+        'template',
+    ];
+
+    private const TYPE_ALIASES = [
+        'adminmodule' => 'admin_module',
+        'admin-module' => 'admin_module',
+        'html' => 'template',
+        'value_object' => 'valueobject',
+        'value-object' => 'valueobject',
+    ];
+
     private $aiCodeGenerator;
     private $aiCopyGenerator;
 
@@ -19,7 +41,7 @@ class GeneratorFactory
     {
         $aiCodeGenerator = $this->aiCodeGenerator;
         $aiCopyGenerator = $this->aiCopyGenerator;
-        $type = Str::lower($name);
+        $type = $this->normalizeType($name);
         $templatePath = $this->configValue($config, 'templatePath', $this->configValue($config, 'template_path', ''));
         $resolvedOutputPath = $outputPath ?? $this->configValue($config, 'outputPath', $this->configValue($config, 'output_path', ''));
 
@@ -49,6 +71,23 @@ class GeneratorFactory
         }
     }
 
+    public function createOrFail(string $name, array|object $config, string $outputPath = null): IGenerator
+    {
+        $generator = $this->create($name, $config, $outputPath);
+        if (Val::isNotNull($generator)) {
+            return $generator;
+        }
+
+        throw new \InvalidArgumentException(
+            "Unsupported generator type '{$name}'. Supported types: " . implode(', ', $this->supportedTypes())
+        );
+    }
+
+    public function supportedTypes(): array
+    {
+        return self::SUPPORTED_TYPES;
+    }
+
     private function configValue(array|object $config, string $key, mixed $default = null): mixed
     {
         $values = Arr::toArray((array)$config, true);
@@ -58,5 +97,13 @@ class GeneratorFactory
         }
 
         return Arr::make($values)->get($key) ?? $default;
+    }
+
+    private function normalizeType(string $name): string
+    {
+        $type = Str::lower(Str::trim($name));
+        $type = Str::replace($type, ' ', '_');
+
+        return self::TYPE_ALIASES[$type] ?? $type;
     }
 }
