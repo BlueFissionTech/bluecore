@@ -195,8 +195,12 @@ function response($data, $status = 200) {
 	$response = new Response();
 
 	$response->fill($data);
-	http_response_code($status);
-	header('Content-type: application/json');
+	$statusLine = HTTP::statusLine((int)$status);
+	if (Val::isNotEmpty($statusLine)) {
+		header($statusLine, true, (int)$status);
+	}
+
+	header(HTTP::headerLine('Content-Type', 'application/json'));
 	return $response->send();
 }
 
@@ -207,5 +211,5 @@ function response($data, $status = 200) {
  *
  */
 function redirect($location) {
-	header('Location: '.$location);
+	header(HTTP::headerLine('Location', $location));
 }
