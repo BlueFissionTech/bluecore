@@ -1,6 +1,6 @@
 <?php
 
-$roots = ['src', 'tests'];
+$roots = ['src', 'tests', 'examples'];
 $failures = [];
 
 foreach ($roots as $root) {
