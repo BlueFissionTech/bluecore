@@ -73,7 +73,7 @@ abstract class BaseGenerator implements IGenerator
 
     protected function getOutputFile(string $name): string
     {
-        return $this->outputPath . '/' . $name . '.php';
+        return Path::normalize($this->outputPath . DIRECTORY_SEPARATOR . $name . '.php');
     }
 
     abstract public function getType(): string;
