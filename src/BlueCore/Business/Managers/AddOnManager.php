@@ -2,13 +2,18 @@
 
 namespace BlueFission\BlueCore\Business\Managers;
 
+use BlueFission\Arr;
 use BlueFission\Connections\Database\MySQLLink;
+use BlueFission\Data\FileSystem;
 use BlueFission\Services\Service;
 use BlueFission\Utils\Loader;
+use BlueFission\Utils\File;
+use BlueFission\Utils\Path;
 use BlueFission\BlueCore\Domain\AddOn\Models\AddOnModel;
 use BlueFission\BlueCore\Domain\AddOn\AddOn;
 use BlueFission\Str;
 use BlueFission\System\System;
+use BlueFission\Val;
 
 class AddOnManager extends Service
 {
@@ -24,18 +29,21 @@ class AddOnManager extends Service
         parent::__construct();
     }
 
-    public function install($name)
+    public function install($name, bool $installDependencies = false): array
     {
         $data = $this->getAddOnData($name);
-        $status = '';
-        if ($data->libraries) {
-            $system = new System();
-            $system->cwd(APP_ROOT);
-            foreach ($data->libraries as $library) {
-                $system->run("composer require {$library}");
-                $status .= $system->response();
+        $result = $this->lifecycleResult('install', $data->name);
+        $dependencyCommands = $this->dependencyCommands($data->libraries, 'require');
+        $result['dependencies'] = $dependencyCommands;
+
+        if (Arr::isNotEmpty($dependencyCommands)) {
+            if ($installDependencies) {
+                $result['messages'][] = $this->runDependencyCommands($dependencyCommands);
+            } else {
+                $result['messages'][] = 'Dependency installation skipped; run the listed commands explicitly if required.';
             }
         }
+
         $addon = new AddOn;
         $addon->assign($data);
         $addon->path = resolve_path('addons' . DIRECTORY_SEPARATOR . $name);
@@ -46,29 +54,33 @@ class AddOnManager extends Service
         ob_start();
         $datasource->runMigrations($name);
         $datasource->populate();
-        $status .= ob_get_contents();
+        $result['messages'][] = ob_get_contents();
         ob_end_clean();
 
         $this->callHook($addon, 'install');
         $this->_model->write($addon);
-        return $status . $this->_model->status() . $this->_model->query();
+        $result['modelStatus'] = $this->_model->status();
+        $result['query'] = $this->_model->query();
+
+        return $result;
     }
 
-    public function installAll()
+    public function installAll(bool $installDependencies = false): array
     {
         $addOns = $this->showAllAddOns();
-        $status = '';
+        $results = [];
         foreach ($addOns as $addOn) {
             if (!$this->_model->exists(['name' => $addOn->name])) {
-                $status .= $this->install($addOn->name);
+                $results[] = $this->install($addOn->name, $installDependencies);
             }
         }
-        return $status;
+        return $results;
     }
 
-    public function uninstall($addOnId)
+    public function uninstall($addOnId, bool $removeDependencies = false): array
     {
         $addon = $this->getAddOnById($addOnId);
+        $result = $this->lifecycleResult('uninstall', $addon->name);
 
         // Check for and call the `uninstall` function hook
         $this->callHook($addon, 'uninstall');
@@ -76,16 +88,14 @@ class AddOnManager extends Service
         $this->_model->delete(['addon_id' => $addOnId]);
 
         $data = $this->getAddOnData($addon->name);
-        $status = '';
+        $dependencyCommands = $this->dependencyCommands($data->libraries, 'remove');
+        $result['dependencies'] = $dependencyCommands;
 
-        if ($data->libraries) {
-            $system = new System();
-            $system->cwd(APP_ROOT);
-            foreach ($data->libraries as $library) {
-                $library = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $library);
-                // Ensure the library name is safe and valid
-                $system->run("composer remove {$library}");
-                $status .= $system->response();
+        if (Arr::isNotEmpty($dependencyCommands)) {
+            if ($removeDependencies) {
+                $result['messages'][] = $this->runDependencyCommands($dependencyCommands);
+            } else {
+                $result['messages'][] = 'Dependency removal skipped; run the listed commands explicitly if required.';
             }
         }
 
@@ -95,41 +105,59 @@ class AddOnManager extends Service
         ob_start();
         // $datasource->revertMigrations();
         $datasource->revertBatch($addon->name);
-        $status .= ob_get_contents();
+        $result['messages'][] = ob_get_contents();
         ob_end_clean();
 
-        return $status . $this->_model->status();
+        $result['modelStatus'] = $this->_model->status();
+
+        return $result;
     }
 
-    public function activate($addOnId)
+    public function activate($addOnId): array
     {
         $this->_model->write(['addon_id' => $addOnId, 'is_active' => 1]);
-        die($this->_model->status());
+
+        return $this->lifecycleResult('activate', (string)$addOnId, $this->_model->status(), $this->_model->query());
     }
 
-    public function activateAll()
+    public function activateAll(): array
     {
         $addOns = $this->_model->getAllAddOns();
-        $status = '';
+        $results = [];
         foreach ($addOns as $addOn) {
             if (!$addOn->is_active) {
-                $status .= $this->activate($addOn->addon_id);
+                $results[] = $this->activate($addOn->addon_id);
             }
         }
-        return $status;
+        return $results;
     }
 
-    public function deactivate($addOnId)
+    public function deactivate($addOnId): array
     {
         $this->_model->write(['addon_id' => $addOnId, 'is_active' => 0]);
+
+        return $this->lifecycleResult('deactivate', (string)$addOnId, $this->_model->status(), $this->_model->query());
     }
 
     public function showAllAddOns()
     {
-        $addOns = array_values(array_diff(scandir(resolve_path('addons')), ['.', '..']));
+        $addonsPath = resolve_path('addons');
+        if (!is_dir($addonsPath)) {
+            return [];
+        }
+
+        $addOns = Arr::make(scandir($addonsPath) ?: [])
+            ->diff(['.', '..'])
+            ->values()
+            ->toArray();
         $list = [];
         foreach ($addOns as $addOn) {
-            $data = json_decode(file_get_contents(resolve_path('addons' . DIRECTORY_SEPARATOR . $addOn  . DIRECTORY_SEPARATOR . 'definition.json')));
+            try {
+                $data = $this->getAddOnData($addOn);
+            } catch (\Throwable $exception) {
+                continue;
+            }
+
             $model = new AddOn;
             $model->name = $data->name ?? $addOn;
             $model->description = Str::truncate($data->description ?? "");
@@ -160,7 +188,7 @@ class AddOnManager extends Service
     {
         $primaryFile = $addOn->path . DIRECTORY_SEPARATOR . $addOn->primary_file;
         // $primaryFile = resolve_path('addons' . DIRECTORY_SEPARATOR . $addon . DIRECTORY_SEPARATOR . 'main.php');
-        if ($primaryFile != DIRECTORY_SEPARATOR && file_exists($primaryFile)) {
+        if ($primaryFile != DIRECTORY_SEPARATOR && (new File())->exists($primaryFile)) {
             require_once($primaryFile);
         }
     }
@@ -168,7 +196,7 @@ class AddOnManager extends Service
     protected function callHook(AddOn $addOn, $hook)
     {
         $primaryFile = $addOn->path . DIRECTORY_SEPARATOR . $addOn->primary_file;
-        if (file_exists($primaryFile)) {
+        if ((new File())->exists($primaryFile)) {
             require_once($primaryFile);
 
             $hookFunction = "{$addOn->name}_{$hook}";
@@ -218,8 +246,75 @@ class AddOnManager extends Service
 
     protected function getAddOnData($name)
     {
-        $data = json_decode(file_get_contents(resolve_path('addons' . DIRECTORY_SEPARATOR . $name  . DIRECTORY_SEPARATOR . 'definition.json')));
+        $definitionPath = resolve_path('addons' . DIRECTORY_SEPARATOR . $name  . DIRECTORY_SEPARATOR . 'definition.json');
+        if (!(new File())->isReachable($definitionPath)) {
+            throw new \InvalidArgumentException("Add-on definition not found for {$name}.");
+        }
+
+        $data = json_decode(File::readContents($definitionPath));
+        if (!$data || json_last_error() !== JSON_ERROR_NONE) {
+            throw new \RuntimeException("Add-on definition is invalid JSON for {$name}.");
+        }
+
+        if (Val::isEmpty($data->name ?? null)) {
+            $data->name = $name;
+        }
+
+        $data->libraries = Arr::toArray($data->libraries ?? [], true);
+        $data->primary_file = $data->primary_file ?? 'main.php';
+
         return $data;
+    }
+
+    protected function dependencyCommands(array $libraries, string $operation): array
+    {
+        if (!Arr::has(['require', 'remove'], $operation, true)) {
+            throw new \InvalidArgumentException('Unsupported dependency operation.');
+        }
+
+        return Arr::make($libraries)
+            ->map(fn ($library) => $this->sanitizeLibraryName((string)$library))
+            ->filter(fn ($library) => Val::isNotEmpty($library))
+            ->map(fn ($library) => "composer {$operation} {$library}")
+            ->values()
+            ->toArray();
+    }
+
+    protected function sanitizeLibraryName(string $library): ?string
+    {
+        $library = Str::lower(Str::trim($library));
+        if (!Str::matchPattern($library, '/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/')) {
+            return null;
+        }
+
+        return $library;
+    }
+
+    private function runDependencyCommands(array $commands): string
+    {
+        $system = new System();
+        $system->cwd(APP_ROOT);
+        $status = '';
+
+        foreach ($commands as $command) {
+            $system->run($command);
+            $status .= $system->response();
+        }
+
+        return $status;
+    }
+
+    private function lifecycleResult(string $action, string $addOn = '', mixed $modelStatus = null, string $query = ''): array
+    {
+        return Arr::make([
+            'ok' => true,
+            'action' => $action,
+            'addon' => $addOn,
+            'messages' => [],
+            'dependencies' => [],
+            'modelStatus' => $modelStatus,
+            'query' => $query,
+        ])->toArray();
     }
 
     protected function autoload()
