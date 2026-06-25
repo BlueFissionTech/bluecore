@@ -111,7 +111,7 @@ if (!function_exists('template_base_dir')) {
 	{
 		$dir = Path::normalize($callerDir);
 		$segments = Arr::toArray(Str::split($dir, DIRECTORY_SEPARATOR), true);
-		$markupIndex = array_search('markup', $segments, true);
+		$markupIndex = Arr::search('markup', $segments, true);
 
 		if ($markupIndex !== false) {
 			$baseSegments = Arr::make($segments)
@@ -157,7 +157,7 @@ if (!function_exists( 'template_dir' )) {
 	 * @return string The directory path of the current template
 	 */
 	function template_dir( ) {
-		$dir = str_replace(SITE_ROOT, '', __DIR__);
+		$dir = Str::replace(SITE_ROOT, '', __DIR__);
 		$dir = ROOT_URL . $dir;
 		return $dir;
 	}
