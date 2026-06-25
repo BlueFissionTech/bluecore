@@ -101,9 +101,12 @@ class GeneratorFactory
 
     private function normalizeType(string $name): string
     {
-        $type = Str::lower(Str::trim($name));
-        $type = Str::replace($type, ' ', '_');
-
+        $type = Str::make($name)
+            ->trim()
+            ->lower()
+            ->replace(' ', '_')
+            ->val();
+        
         return self::TYPE_ALIASES[$type] ?? $type;
     }
 }
