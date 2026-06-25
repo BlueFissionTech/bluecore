@@ -4,6 +4,8 @@ namespace BlueFission\BlueCore\Model;
 
 use BlueFission\Arr;
 use BlueFission\Obj;
+use BlueFission\Str;
+use BlueFission\Val;
 
 class ModelSQLite extends BaseModel
 {
@@ -41,12 +43,12 @@ class ModelSQLite extends BaseModel
 
     protected function resolvePrimaryKey(): string
     {
-        if ($this->_key) {
+        if (Val::isNotEmpty($this->_key)) {
             return $this->_key;
         }
 
         foreach ($this->_fields as $field) {
-            if (strtolower(substr($field, -2)) === 'id') {
+            if (Str::endsWith($field, 'id', Str::IGNORE_CASE)) {
                 return $field;
             }
         }
@@ -74,14 +76,13 @@ class ModelSQLite extends BaseModel
         $id = $this->_idField;
 
         if (
-            !in_array('created', $this->_fields, true) &&
+            !Arr::has($this->_fields, 'created', true) &&
             !$this->_save_related_tables &&
             (
                 !$this->_dataObject->field($id) ||
                 (
-                    isset($values) &&
-                    !(is_array($values) && isset($values[$id])) &&
-                    !(is_object($values) && isset($values->$id))
+                    Val::isNotNull($values) &&
+                    !Arr::hasKey(Arr::toArray((array)$values, true), $id)
                 )
             )
         ) {
@@ -89,7 +90,7 @@ class ModelSQLite extends BaseModel
             $forceCreatedTimestamp = true;
         }
 
-        if (!in_array('updated', $this->_fields, true) && !$this->_save_related_tables) {
+        if (!Arr::has($this->_fields, 'updated', true) && !$this->_save_related_tables) {
             $this->_fields[] = 'updated';
             $forceUpdatedTimestamp = true;
         }
@@ -98,20 +99,13 @@ class ModelSQLite extends BaseModel
         $result = parent::write($values);
 
         if ($forceCreatedTimestamp) {
-            $key = array_search('created', $this->_fields, true);
-            if ($key !== false) {
-                unset($this->_fields[$key]);
-            }
+            $this->removeField('created');
         }
 
         if ($forceUpdatedTimestamp) {
-            $key = array_search('updated', $this->_fields, true);
-            if ($key !== false) {
-                unset($this->_fields[$key]);
-            }
+            $this->removeField('updated');
         }
 
-        $this->_fields = array_values($this->_fields);
         $this->_dataObject->config('fields', $this->_fields);
 
         return $result;
@@ -132,5 +126,12 @@ class ModelSQLite extends BaseModel
     public function query()
     {
         return $this->_dataObject->query();
+    }
+
+    private function removeField(string $field): void
+    {
+        $this->_fields = Arr::make($this->_fields)
+            ->filter(static fn ($value) => $value !== $field)
+            ->toArray();
     }
 }

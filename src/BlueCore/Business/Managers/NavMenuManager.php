@@ -1,9 +1,11 @@
 <?php
 namespace BlueFission\BlueCore\Business\Managers;
 
+use BlueFission\Arr;
 use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\Services\Service;
 use BlueFission\BlueCore\Auth as Authenticator;
+use BlueFission\BlueCore\MenuItem;
 
 class NavMenuManager extends Service
 {
@@ -19,7 +21,7 @@ class NavMenuManager extends Service
     public function registerMenu($menu)
     {
         // Ensure menu is not already registered
-        if (!array_key_exists($menu->getId(), $this->_menus)) {
+        if (!Arr::hasKey($this->_menus, $menu->getId())) {
             $this->_menus[$menu->getId()] = $menu;
         }
         // $this->_menus[$menu->getName()] = $menu;
@@ -27,7 +29,7 @@ class NavMenuManager extends Service
 
     public function getMenu($menuId)
     {
-        if (array_key_exists($menuId, $this->_menus)) {
+        if (Arr::hasKey($this->_menus, $menuId)) {
             return $this->_menus[$menuId];
         }
         return null;
@@ -35,7 +37,7 @@ class NavMenuManager extends Service
 
     public function addMenuItem($menuId, $menuItem)
     {
-        if (array_key_exists($menuId, $this->_menus)) {
+        if (Arr::hasKey($this->_menus, $menuId)) {
             $this->_menus[$menuId]->addItem($menuItem);
         }
     }
@@ -43,7 +45,7 @@ class NavMenuManager extends Service
     public function renderMenu(string $menuName)
     {
         $renderedItems = [];
-        if (isset($this->_menus[$menuName])) {
+        if (Arr::hasKey($this->_menus, $menuName)) {
             $menu = $this->_menus[$menuName];
             $menuItems = $menu->getItems();
 
@@ -73,7 +75,7 @@ class NavMenuManager extends Service
 
     public function displayMenuItemBasedOnRole($menuId, $itemId, $role)
     {
-        if (array_key_exists($menuId, $this->_menus)) {
+        if (Arr::hasKey($this->_menus, $menuId)) {
             $menuItem = $this->_menus[$menuId]->getItem($itemId);
             if ($menuItem->getRole() === $role) {
                 return $menuItem->render();
@@ -84,7 +86,7 @@ class NavMenuManager extends Service
 
     public function displayMenuItemBasedOnGroup($menuId, $itemId, $group)
     {
-        if (array_key_exists($menuId, $this->_menus)) {
+        if (Arr::hasKey($this->_menus, $menuId)) {
             $menuItem = $this->_menus[$menuId]->getItem($itemId);
             if ($menuItem && $menuItem->getGroup() === $group) {
                 return $menuItem->render();
@@ -95,7 +97,7 @@ class NavMenuManager extends Service
 
     public function displayMenuItemBasedOnPermission($menuId, $itemId, $permission)
     {
-        if (array_key_exists($menuId, $this->_menus)) {
+        if (Arr::hasKey($this->_menus, $menuId)) {
             $menuItem = $this->_menus[$menuId]->getItem($itemId);
             if ($menuItem && $menuItem->getPermission() === $permission) {
                 return $menuItem->render();
