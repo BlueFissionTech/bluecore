@@ -1,7 +1,10 @@
 <?php
 namespace BlueFission\BlueCore;
 
+use BlueFission\Arr;
+use BlueFission\Collections\Collection;
 use BlueFission\HTML\Template;
+use BlueFission\Str;
 
 class Menu
 {
@@ -48,7 +51,7 @@ class Menu
 
     public function getItem($itemId)
     {
-        if (array_key_exists($itemId, $this->_items)) {
+        if (Arr::hasKey($this->_items, $itemId)) {
             return $this->_items[$itemId];
         }
         return null;
@@ -63,9 +66,10 @@ class Menu
     {
 
         // Implement your rendering logic here
-        $renderedItems = [];
-        $renderedItems = array_map(function($item) { return $item->render(); }, $this->_items);
-        $renderedItems = implode('', $renderedItems);
+        $renderedItems = (new Collection($this->_items))
+            ->map(function($item) { return $item->render(); })
+            ->toArray();
+        $renderedItems = Str::concat('', ...$renderedItems);
 
         $app = instance();
         $theme = $app->theme($this->_theme);

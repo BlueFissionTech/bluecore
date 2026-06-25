@@ -1,10 +1,11 @@
 <?php
+namespace BlueFission\BlueCore\Generation;
 
 class ContentGenerator implements IGenerator
 {
     protected $aiCopyGenerator;
 
-    public function __construct(AICopyGenerator $aiCopyGenerator)
+    public function __construct(IAICopyGenerator $aiCopyGenerator)
     {
         $this->aiCopyGenerator = $aiCopyGenerator;
     }

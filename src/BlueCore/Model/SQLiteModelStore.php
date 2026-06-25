@@ -2,10 +2,16 @@
 
 namespace BlueFission\BlueCore\Model;
 
+use BlueFission\Arr;
 use BlueFission\Collections\Group;
+use BlueFission\Data\Storage\SQLite as DevElationSQLite;
+use BlueFission\Data\Storage\Storage;
+use BlueFission\Str;
 
 class SQLiteModelStore
 {
+    public const UPSTREAM_STORAGE = DevElationSQLite::class;
+
     protected $_config = [
         'location' => '',
         'name' => '',
@@ -41,9 +47,9 @@ class SQLiteModelStore
             return $this->_config;
         }
 
-        if (is_array($config)) {
+        if (Arr::is($config)) {
             foreach ($config as $key => $item) {
-                if (array_key_exists($key, $this->_config)) {
+                if (Arr::hasKey($this->_config, $key)) {
                     $this->_config[$key] = $item;
                 }
             }
@@ -55,7 +61,7 @@ class SQLiteModelStore
             return $this->_config[$config] ?? null;
         }
 
-        if (array_key_exists($config, $this->_config)) {
+        if (Arr::hasKey($this->_config, $config)) {
             $this->_config[$config] = $value;
         }
 
@@ -101,7 +107,7 @@ class SQLiteModelStore
 
     public function order($field, $direction = 'ASC')
     {
-        $this->_order[$field] = strtoupper($direction) === 'DESC' ? 'DESC' : 'ASC';
+        $this->_order[$field] = Str::match($direction, 'DESC', Str::IGNORE_CASE) ? 'DESC' : 'ASC';
 
         return $this;
     }
@@ -174,7 +180,7 @@ class SQLiteModelStore
             }
         }
 
-        $this->_status = $result ? 'Success.' : 'Failed.';
+        $this->_status = $result ? Storage::STATUS_SUCCESS : Storage::STATUS_FAILED;
         if ($result instanceof \SQLite3Result) {
             $result->finalize();
         }
@@ -226,7 +232,7 @@ class SQLiteModelStore
         }
 
         $this->_rows = $rows;
-        $this->_status = 'Success.';
+        $this->_status = Storage::STATUS_SUCCESS;
 
         if ($rows) {
             foreach ($rows[0] as $field => $value) {
@@ -251,7 +257,7 @@ class SQLiteModelStore
             $statement = $db->prepare($this->_query);
             $statement->bindValue(':__key', $identifier, SQLITE3_INTEGER);
             $result = $statement->execute();
-            $this->_status = $result ? 'Success.' : 'Failed.';
+            $this->_status = $result ? Storage::STATUS_SUCCESS : Storage::STATUS_FAILED;
             if ($result instanceof \SQLite3Result) {
                 $result->finalize();
             }
@@ -288,6 +294,36 @@ class SQLiteModelStore
         return $this;
     }
 
+    public function diagnostics(): array
+    {
+        return Arr::make([
+            'upstreamStorage' => self::UPSTREAM_STORAGE,
+            'table' => $this->config('name'),
+            'key' => $this->primary(),
+            'query' => $this->_query,
+            'status' => $this->_status,
+            'rowCount' => Arr::count($this->_rows),
+        ])->toArray();
+    }
+
+    public static function boundary(): array
+    {
+        return Arr::make([
+            'upstreamStorage' => self::UPSTREAM_STORAGE,
+            'blueCoreRole' => 'model_projection_store',
+            'delegatesToUpstreamFor' => [
+                'status_constants',
+                'sqlite_storage_contract',
+            ],
+            'retainsLocally' => [
+                'explicit_column_types',
+                'model_field_projection',
+                'materialized_group_results',
+                'single_table_model_query_diagnostics',
+            ],
+        ])->toArray();
+    }
+
     public function primary(): string
     {
         return $this->config('key');
@@ -311,7 +347,7 @@ class SQLiteModelStore
             if (!$type) {
                 $type = $field === $key
                     ? 'INTEGER PRIMARY KEY AUTOINCREMENT'
-                    : (in_array($field, ['created', 'updated', 'date'], true) ? 'DATETIME' : 'TEXT');
+                    : (Arr::has(['created', 'updated', 'date'], $field, true) ? 'DATETIME' : 'TEXT');
             }
             $columns[] = sprintf('`%s` %s', $field, $type);
         }

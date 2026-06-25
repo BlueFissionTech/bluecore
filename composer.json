@@ -3,7 +3,7 @@
     "description": "Blue Fission Opus Framework Core",
     "license": "MIT",
     "type": "composer-plugin",
-    "keywords": ["framework, core, bluefission, opus"],
+    "keywords": ["framework", "core", "bluefission", "opus"],
     "authors": [
         {
             "name": "Devon Scott",
@@ -27,7 +27,9 @@
         }
     ],
     "minimum-stability": "dev",
+    "prefer-stable": true,
     "require": {
+        "php": ">=8.2",
         "bluefission/develation": "^1.2.0-alpha",
         "composer/installers": "^1.11",
         "composer-plugin-api": "^2.0",
@@ -36,8 +38,17 @@
         "phpoffice/phpspreadsheet": "^5.0"
     },
     "require-dev": {
-        "phpunit/phpunit": "^11.1@dev",
-        "php": ">=8.0.0"
+        "phpunit/phpunit": "^11.1@dev"
+    },
+    "scripts": {
+        "lint": "@php scripts/lint.php",
+        "test": "phpunit --do-not-cache-result tests",
+        "ci": [
+            "Composer\\Config::disableProcessTimeout",
+            "composer validate --no-check-publish --strict",
+            "@lint",
+            "@test"
+        ]
     },
     "autoload": {
         "psr-4": {

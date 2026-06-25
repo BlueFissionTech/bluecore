@@ -1,5 +1,5 @@
 <?php
-BlueFission\BlueCore\Generation
+namespace BlueFission\BlueCore\Generation;
 
 interface ICSSGenerator
 {

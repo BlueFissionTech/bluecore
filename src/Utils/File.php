@@ -2,21 +2,26 @@
 
 namespace BlueFission\Utils;
 
-class File
+use BlueFission\Data\File as BaseFile;
+use BlueFission\Arr;
+use BlueFission\Flag;
+use BlueFission\Val;
+
+class File extends BaseFile
 {
     public static function ensureFile($path, $contents = '', $overwrite = false)
     {
         $normalized = Path::normalize($path);
-        if ($normalized === '') {
+        if (Val::isEmpty($normalized)) {
             throw new \InvalidArgumentException('Path cannot be empty.');
         }
 
-        $dir = dirname($normalized);
-        if ($dir && $dir !== '.' && $dir !== DIRECTORY_SEPARATOR) {
+        $dir = Path::parentPath($normalized);
+        if (Val::isNotEmpty($dir) && $dir !== '.' && $dir !== DIRECTORY_SEPARATOR) {
             Path::ensureDir($dir);
         }
 
-        if (file_exists($normalized) && !$overwrite) {
+        if ((new static())->exists($normalized) && Flag::isFalse($overwrite)) {
             return $normalized;
         }
 
@@ -30,12 +35,12 @@ class File
     public static function writeAtomic($path, $contents)
     {
         $normalized = Path::normalize($path);
-        if ($normalized === '') {
+        if (Val::isEmpty($normalized)) {
             throw new \InvalidArgumentException('Path cannot be empty.');
         }
 
-        $dir = dirname($normalized);
-        if ($dir && $dir !== '.' && $dir !== DIRECTORY_SEPARATOR) {
+        $dir = Path::parentPath($normalized);
+        if (Val::isNotEmpty($dir) && $dir !== '.' && $dir !== DIRECTORY_SEPARATOR) {
             Path::ensureDir($dir);
         }
 
@@ -58,5 +63,86 @@ class File
         }
 
         return $normalized;
+    }
+
+    public static function readContents($path): string
+    {
+        $normalized = Path::normalize($path);
+        if (Val::isEmpty($normalized)) {
+            throw new \InvalidArgumentException('Path cannot be empty.');
+        }
+
+        if (!(new static())->isReachable($normalized)) {
+            throw new \RuntimeException("Unable to read file: {$normalized}");
+        }
+
+        $contents = file_get_contents($normalized);
+        if ($contents === false) {
+            throw new \RuntimeException("Unable to read file: {$normalized}");
+        }
+
+        return $contents;
+    }
+
+    public static function readiness($path, bool $includeHash = false): array
+    {
+        $normalized = Path::normalize($path);
+        $exists = Val::isNotEmpty($normalized) && is_file($normalized);
+        $readable = $exists && is_readable($normalized);
+        $writable = $exists
+            ? is_writable($normalized)
+            : self::parentIsWritable($normalized);
+
+        $result = [
+            'normalizedPath' => $normalized,
+            'expectedType' => 'file',
+            'exists' => Flag::parseBool($exists),
+            'readable' => Flag::parseBool($readable),
+            'writable' => Flag::parseBool($writable),
+            'reason' => self::readinessReason($normalized, $exists, $readable, $writable),
+            'hash' => null,
+        ];
+
+        if (Flag::parseBool($includeHash) && Flag::parseBool($readable)) {
+            $result['hash'] = hash_file('sha256', $normalized) ?: null;
+        }
+
+        return Arr::make($result)->toArray();
+    }
+
+    private static function parentIsWritable(string $path): bool
+    {
+        if (Val::isEmpty($path)) {
+            return false;
+        }
+
+        $dir = Path::parentPath($path);
+
+        return Val::isNotEmpty($dir) && is_dir($dir) && is_writable($dir);
+    }
+
+    private static function readinessReason(string $path, bool $exists, bool $readable, bool $writable): ?string
+    {
+        if (Val::isEmpty($path)) {
+            return 'invalid_path';
+        }
+
+        if (file_exists($path) && !$exists) {
+            return 'not_file';
+        }
+
+        if (!$exists) {
+            return self::parentIsWritable($path) ? 'missing' : 'parent_unavailable';
+        }
+
+        if (!$readable) {
+            return 'unreadable';
+        }
+
+        if (!$writable) {
+            return 'unwritable';
+        }
+
+        return null;
     }
 }

@@ -3,6 +3,7 @@ namespace BlueFission\BlueCore\Model;
 
 use BlueFission\Arr;
 use BlueFission\Obj;
+use BlueFission\Val;
 use BlueFission\Behavioral\Behaviors\Event;
 use BlueFission\BlueCore\Model\BaseModel;
 use BlueFission\Data\Storage\MySQLBulk;
@@ -60,7 +61,7 @@ class ModelSql extends BaseModel {
 	 */
 	public function __construct( MySQLLink $link = null )
 	{
-		if ($link) {
+		if (Val::isNotNull($link)) {
 			$link->when(Event::ACTION_FAILED, function($event) {
 				// Handle the event when the link fails
 				throw new \Exception("Database connection failed: " . $event->context->info);
@@ -124,43 +125,38 @@ class ModelSql extends BaseModel {
 	 */
 	public function write($values = null) :Obj
 	{
-		$force_created_timestamp = false;
-		$force_updated_timestamp = false;
+		$forceCreatedTimestamp = false;
+		$forceUpdatedTimestamp = false;
 		$id = $this->_idField;
 
 		if (
-			!in_array('created', $this->_fields) && 
+			!Arr::has($this->_fields, 'created', true) &&
 			!$this->_save_related_tables && 
-			(!$this->_dataObject->$id || 
-				(isset($values) && 
-					!(is_array($values) && isset($values[$id])) && 
-					!(is_object($values) && isset($values->$id))
+			(!$this->_dataObject->$id ||
+				(Val::isNotNull($values) &&
+					!Arr::hasKey(Arr::toArray((array)$values, true), $id)
 				)
 			)
 		) {
 			$this->_fields[] = 'created';
-			$force_created_timestamp = true;
+			$forceCreatedTimestamp = true;
 		}
-		if (!in_array('updated', $this->_fields) && !$this->_save_related_tables) {
+		if (!Arr::has($this->_fields, 'updated', true) && !$this->_save_related_tables) {
 			$this->_fields[] = 'updated';
-			$force_updated_timestamp = true;
+			$forceUpdatedTimestamp = true;
 		}
 		$this->_dataObject->config('fields', $this->_fields);
 		// Do the work
 		$result = parent::write($values);
-		if ($force_created_timestamp) {
-			if (($key = array_search("created", $this->_fields)) !== false) {
-			    unset($this->_fields[$key]);
-			}
+		if ($forceCreatedTimestamp) {
+			$this->removeField('created');
 		}
-		if ($force_updated_timestamp) {
-			if (($key = array_search("updated", $this->_fields)) !== false) {
-			    unset($this->_fields[$key]);
-			}
+		if ($forceUpdatedTimestamp) {
+			$this->removeField('updated');
 		}
 		$this->_dataObject->config('fields', $this->_fields);
 
-		return $this;
+		return $result;
 	}
 
 	/**
@@ -193,6 +189,13 @@ class ModelSql extends BaseModel {
 	public function query()
 	{
 		return $this->_dataObject->query();
+	}
+
+	private function removeField(string $field): void
+	{
+		$this->_fields = Arr::make($this->_fields)
+			->filter(static fn ($value) => $value !== $field)
+			->toArray();
 	}
 
 }

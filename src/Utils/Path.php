@@ -2,36 +2,66 @@
 
 namespace BlueFission\Utils;
 
-class Path
+use BlueFission\Arr;
+use BlueFission\Data\Directory;
+use BlueFission\Flag;
+use BlueFission\Str;
+use BlueFission\Val;
+
+class Path extends Directory
 {
     public static function normalize($path)
     {
-        if ($path === null) {
+        if (Val::isNull($path)) {
             return '';
         }
 
         $path = (string)$path;
-        if ($path === '') {
+        if (Val::isEmpty($path)) {
             return '';
         }
 
-        $path = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path);
+        $path = Str::replace($path, '/', DIRECTORY_SEPARATOR);
+        $path = Str::replace($path, '\\', DIRECTORY_SEPARATOR);
 
-        $isUnc = (DIRECTORY_SEPARATOR === '\\' && strpos($path, '\\\\') === 0);
+        $isUnc = (DIRECTORY_SEPARATOR === '\\' && Str::startsWith($path, '\\\\'));
         $separator = preg_quote(DIRECTORY_SEPARATOR, '#');
-        $path = preg_replace('#' . $separator . '+#', DIRECTORY_SEPARATOR, $path);
+        $path = Str::replacePattern($path, '#' . $separator . '+#', DIRECTORY_SEPARATOR);
 
         if ($isUnc) {
-            $path = '\\\\' . ltrim($path, '\\');
+            $path = '\\\\' . Str::trim($path, '\\');
         }
 
         return $path;
     }
 
+    public static function parentPath($path)
+    {
+        return dirname(self::normalize($path));
+    }
+
+    public static function readiness($path): array
+    {
+        $normalized = self::normalize($path);
+        $exists = Val::isNotEmpty($normalized) && is_dir($normalized);
+        $readable = $exists && is_readable($normalized);
+        $writable = $exists && is_writable($normalized);
+
+        return Arr::make([
+            'normalizedPath' => $normalized,
+            'expectedType' => 'directory',
+            'exists' => Flag::parseBool($exists),
+            'readable' => Flag::parseBool($readable),
+            'writable' => Flag::parseBool($writable),
+            'reason' => self::readinessReason($normalized, $exists, $readable, $writable),
+            'hash' => null,
+        ])->toArray();
+    }
+
     public static function ensureDir($path, $mode = 0775, $recursive = true)
     {
         $normalized = self::normalize($path);
-        if ($normalized === '') {
+        if (Val::isEmpty($normalized)) {
             throw new \InvalidArgumentException('Path cannot be empty.');
         }
 
@@ -48,5 +78,30 @@ class Path
         }
 
         return $normalized;
+    }
+
+    private static function readinessReason(string $path, bool $exists, bool $readable, bool $writable): ?string
+    {
+        if (Val::isEmpty($path)) {
+            return 'invalid_path';
+        }
+
+        if (file_exists($path) && !$exists) {
+            return 'not_directory';
+        }
+
+        if (!$exists) {
+            return 'missing';
+        }
+
+        if (!$readable) {
+            return 'unreadable';
+        }
+
+        if (!$writable) {
+            return 'unwritable';
+        }
+
+        return null;
     }
 }

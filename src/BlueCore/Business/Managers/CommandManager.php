@@ -1,4 +1,4 @@
-Busin<?php
+<?php
 namespace BlueFission\BlueCore\Business\Managers;
 
 use BlueFission\Services\Service;

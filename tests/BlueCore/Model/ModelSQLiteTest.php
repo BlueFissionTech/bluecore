@@ -3,6 +3,9 @@
 namespace BlueFission\Tests\BlueCore\Model;
 
 use BlueFission\BlueCore\Model\ModelSQLite;
+use BlueFission\BlueCore\Model\SQLiteModelStore;
+use BlueFission\Data\Storage\SQLite as DevElationSQLite;
+use BlueFission\Data\Storage\Storage;
 use PHPUnit\Framework\TestCase;
 
 class ModelSQLiteTest extends TestCase
@@ -54,6 +57,34 @@ class ModelSQLiteTest extends TestCase
         $this->assertSame('first', $rows[0]['name']);
         $this->assertSame('second', $rows[1]['name']);
     }
+
+    public function testSQLiteStoreBoundaryNamesDevElationStorageAndLocalResponsibilities(): void
+    {
+        $boundary = SQLiteModelStore::boundary();
+
+        $this->assertSame(DevElationSQLite::class, $boundary['upstreamStorage']);
+        $this->assertSame('model_projection_store', $boundary['blueCoreRole']);
+        $this->assertContains('sqlite_storage_contract', $boundary['delegatesToUpstreamFor']);
+        $this->assertContains('materialized_group_results', $boundary['retainsLocally']);
+    }
+
+    public function testSQLiteStoreDiagnosticsExposeQueryStatusAndRows(): void
+    {
+        $writer = new TestSQLiteModel($this->database);
+        $writer->write(['name' => 'first', 'status' => 'active']);
+
+        $reader = new TestSQLiteModel($this->database);
+        $reader->read();
+
+        $diagnostics = $reader->storeDiagnostics();
+
+        $this->assertSame(DevElationSQLite::class, $diagnostics['upstreamStorage']);
+        $this->assertSame('test_records', $diagnostics['table']);
+        $this->assertSame('record_id', $diagnostics['key']);
+        $this->assertStringContainsString('SELECT', $diagnostics['query']);
+        $this->assertSame(Storage::STATUS_SUCCESS, $diagnostics['status']);
+        $this->assertSame(1, $diagnostics['rowCount']);
+    }
 }
 
 class TestSQLiteModel extends ModelSQLite
@@ -64,4 +95,9 @@ class TestSQLiteModel extends ModelSQLite
         'name',
         'status',
     ];
+
+    public function storeDiagnostics(): array
+    {
+        return $this->_dataObject->diagnostics();
+    }
 }

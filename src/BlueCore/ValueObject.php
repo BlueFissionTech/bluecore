@@ -1,6 +1,9 @@
 <?php
 namespace BlueFission\BlueCore;
 
+use BlueFission\Arr;
+use BlueFission\Val;
+
 /**
  * Class ValueObject implements IValueObject
  *
@@ -14,7 +17,7 @@ class ValueObject implements IValueObject {
 	 * @param mixed|null $values An array or object with values to be assigned to the properties
 	 */
 	public function __construct($values = null) {
-		if ($values) {
+		if (Val::isNotEmpty($values)) {
 			$this->assign($values);
 		}
 	}
@@ -25,8 +28,10 @@ class ValueObject implements IValueObject {
 	 * @param mixed $values An array or object with values to be assigned to the properties
 	 */
 	public function assign($values) {
-		foreach ( get_object_vars($this) as $property=>$value ) {
-			$this->$property = is_object($values) ? ( $values->$property ?? $value ) : ( $values[$property] ?? $value );
+		$incoming = Arr::toArray((array)$values, true);
+
+		foreach (Arr::toArray(get_object_vars($this), true) as $property=>$value) {
+			$this->$property = Arr::hasKey($incoming, $property) ? $incoming[$property] : $value;
 		}
 	}
 }

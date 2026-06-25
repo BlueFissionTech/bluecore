@@ -1,6 +1,8 @@
 <?php
 namespace BlueFission\BlueCore\Generation;
 
+use BlueFission\Str;
+
 class ScaffoldGenerator extends BaseGenerator
 {
     public function getType(): string
@@ -28,9 +30,10 @@ class ScaffoldGenerator extends BaseGenerator
     {
         // Analyze the header and return the appropriate field type
         // This is a simple example, adjust it to fit your needs
-        if (strpos(strtolower($header), 'id') !== false) {
+        $fieldName = Str::lower($header);
+        if (Str::contains($fieldName, 'id')) {
             return 'incrementer';
-        } elseif (strpos(strtolower($header), 'date') !== false) {
+        } elseif (Str::contains($fieldName, 'date')) {
             return 'date';
         } else {
             return 'text';

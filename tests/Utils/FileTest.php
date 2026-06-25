@@ -26,13 +26,18 @@ class FileTest extends TestCase
 
         $created = File::ensureFile($path, 'first');
         $this->assertFileExists($created);
-        $this->assertSame('first', file_get_contents($created));
+        $this->assertSame('first', File::readContents($created));
 
         File::ensureFile($path, 'second');
-        $this->assertSame('first', file_get_contents($created));
+        $this->assertSame('first', File::readContents($created));
 
         File::ensureFile($path, 'second', true);
-        $this->assertSame('second', file_get_contents($created));
+        $this->assertSame('second', File::readContents($created));
+    }
+
+    public function testFileUtilityExtendsDevElationFile(): void
+    {
+        $this->assertInstanceOf(\BlueFission\Data\File::class, new File());
     }
 
     public function testWriteAtomicWritesContents(): void
@@ -40,10 +45,50 @@ class FileTest extends TestCase
         $path = $this->tmpDir . DIRECTORY_SEPARATOR . 'atomic.txt';
 
         File::writeAtomic($path, 'hello');
-        $this->assertSame('hello', file_get_contents($path));
+        $this->assertSame('hello', File::readContents($path));
 
         File::writeAtomic($path, 'world');
-        $this->assertSame('world', file_get_contents($path));
+        $this->assertSame('world', File::readContents($path));
+    }
+
+    public function testReadinessReportsExistingFileWithHash(): void
+    {
+        $path = File::ensureFile($this->tmpDir . DIRECTORY_SEPARATOR . 'ready.txt', 'ready', true);
+
+        $readiness = File::readiness($path, true);
+
+        $this->assertSame($path, $readiness['normalizedPath']);
+        $this->assertSame('file', $readiness['expectedType']);
+        $this->assertTrue($readiness['exists']);
+        $this->assertTrue($readiness['readable']);
+        $this->assertTrue($readiness['writable']);
+        $this->assertNull($readiness['reason']);
+        $this->assertSame(hash('sha256', 'ready'), $readiness['hash']);
+    }
+
+    public function testReadinessReportsMissingFileAgainstWritableParent(): void
+    {
+        $dir = $this->tmpDir . DIRECTORY_SEPARATOR . 'target';
+        $path = $dir . DIRECTORY_SEPARATOR . 'missing.txt';
+        \BlueFission\Utils\Path::ensureDir($dir);
+
+        $readiness = File::readiness($path);
+
+        $this->assertFalse($readiness['exists']);
+        $this->assertFalse($readiness['readable']);
+        $this->assertTrue($readiness['writable']);
+        $this->assertSame('missing', $readiness['reason']);
+    }
+
+    public function testReadinessRejectsInvalidAndDirectoryPaths(): void
+    {
+        $this->assertSame('invalid_path', File::readiness('')['reason']);
+
+        $dir = \BlueFission\Utils\Path::ensureDir($this->tmpDir . DIRECTORY_SEPARATOR . 'folder');
+        $readiness = File::readiness($dir);
+
+        $this->assertFalse($readiness['exists']);
+        $this->assertSame('not_file', $readiness['reason']);
     }
 
     private function removeDir($dir): void

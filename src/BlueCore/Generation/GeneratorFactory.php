@@ -1,8 +1,33 @@
 <?php
 namespace BlueFission\BlueCore\Generation;
 
+use BlueFission\Arr;
+use BlueFission\Str;
+use BlueFission\Val;
+
 class GeneratorFactory
 {
+    private const SUPPORTED_TYPES = [
+        'controller',
+        'module',
+        'query',
+        'repository',
+        'scaffold',
+        'valueobject',
+        'content',
+        'admin_module',
+        'css',
+        'template',
+    ];
+
+    private const TYPE_ALIASES = [
+        'adminmodule' => 'admin_module',
+        'admin-module' => 'admin_module',
+        'html' => 'template',
+        'value_object' => 'valueobject',
+        'value-object' => 'valueobject',
+    ];
+
     private $aiCodeGenerator;
     private $aiCopyGenerator;
 
@@ -15,23 +40,28 @@ class GeneratorFactory
     public function create(string $name, array|object $config, string $outputPath = null): ?IGenerator
     {
         $aiCodeGenerator = $this->aiCodeGenerator;
+        $aiCopyGenerator = $this->aiCopyGenerator;
+        $type = $this->normalizeType($name);
+        $templatePath = $this->configValue($config, 'templatePath', $this->configValue($config, 'template_path', ''));
+        $resolvedOutputPath = $outputPath ?? $this->configValue($config, 'outputPath', $this->configValue($config, 'output_path', ''));
+
         switch ($type) {
             case 'controller':
-                return new ControllerGenerator($outputPath, $aiCodeGenerator) {
+                return new ControllerGenerator($templatePath, $resolvedOutputPath, $aiCodeGenerator);
             case 'module':
-                return new AdminModuleGenerator($outputPath, $aiCodeGenerator);
+                return new AdminModuleGenerator($this->configValue($config, 'tableName', $this->configValue($config, 'table_name', '')));
             case 'query':
-                return new QueryGenerator($outputPath, $aiCodeGenerator);
+                return new QueryGenerator($templatePath, $resolvedOutputPath, $aiCodeGenerator);
             case 'repository':
-                return new RepositoryGenerator($outputPath, $aiCodeGenerator);
-            case 'scaffold'
-                return new ScaffoldGenerator($outputPath, $aiCodeGenerator);
+                return new RepositoryGenerator($templatePath, $resolvedOutputPath, $aiCodeGenerator);
+            case 'scaffold':
+                return new ScaffoldGenerator($templatePath, $resolvedOutputPath, $aiCodeGenerator);
             case 'valueobject':
-                return new ValueObjectGenerator($outputPath, $aiCodeGenerator);
+                return new ValueObjectGenerator($templatePath, $resolvedOutputPath, $aiCodeGenerator);
             case 'content':
                 return new ContentGenerator($aiCopyGenerator);
             case 'admin_module':
-                return new AdminModuleGenerator();
+                return new AdminModuleGenerator($this->configValue($config, 'tableName', $this->configValue($config, 'table_name', '')));
             case 'css':
                 return new CSSGenerator([]);
             case 'template':
@@ -39,5 +69,44 @@ class GeneratorFactory
             default:
                 return null;
         }
+    }
+
+    public function createOrFail(string $name, array|object $config, string $outputPath = null): IGenerator
+    {
+        $generator = $this->create($name, $config, $outputPath);
+        if (Val::isNotNull($generator)) {
+            return $generator;
+        }
+
+        throw new \InvalidArgumentException(
+            "Unsupported generator type '{$name}'. Supported types: " . implode(', ', $this->supportedTypes())
+        );
+    }
+
+    public function supportedTypes(): array
+    {
+        return self::SUPPORTED_TYPES;
+    }
+
+    private function configValue(array|object $config, string $key, mixed $default = null): mixed
+    {
+        $values = Arr::toArray((array)$config, true);
+
+        if (!Arr::hasKey($values, $key)) {
+            return $default;
+        }
+
+        return Arr::make($values)->get($key) ?? $default;
+    }
+
+    private function normalizeType(string $name): string
+    {
+        $type = Str::make($name)
+            ->trim()
+            ->lower()
+            ->replace(' ', '_')
+            ->val();
+        
+        return self::TYPE_ALIASES[$type] ?? $type;
     }
 }
