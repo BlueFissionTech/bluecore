@@ -12,25 +12,11 @@
             "role": "Developer"
         }
     ],
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/bluefissiontech/develation"
-        },
-        {
-            "type": "vcs",
-            "url": "https://github.com/bluefissiontech/automata"
-        },
-        {
-            "type": "vcs",
-            "url": "https://github.com/bluefission/simpleclients"
-        }
-    ],
     "minimum-stability": "dev",
     "prefer-stable": true,
     "require": {
         "php": ">=8.2",
-        "bluefission/develation": "^1.2.0-alpha",
+        "bluefission/develation": "^1.3.39",
         "composer/installers": "^1.11",
         "composer-plugin-api": "^2.0",
         "vlucas/phpdotenv": "^5.5",

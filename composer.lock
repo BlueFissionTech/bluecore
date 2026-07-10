@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9304803fb71777fb219b8bb9a889aadb",
+    "content-hash": "b07b307ca8429d9fee91c6db7782b485",
     "packages": [
         {
             "name": "bluefission/develation",
-            "version": "v1.3.36-alpha",
+            "version": "v1.3.39",
             "source": {
                 "type": "git",
                 "url": "https://github.com/BlueFissionTech/develation.git",
-                "reference": "5ed8613af223394421edb36781cf8d2e0a750f5d"
+                "reference": "ee0a240d2d0cff2f15cb243411e2f1e7d0c0b2c1"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/BlueFissionTech/develation/zipball/5ed8613af223394421edb36781cf8d2e0a750f5d",
-                "reference": "5ed8613af223394421edb36781cf8d2e0a750f5d",
+                "url": "https://api.github.com/repos/BlueFissionTech/develation/zipball/ee0a240d2d0cff2f15cb243411e2f1e7d0c0b2c1",
+                "reference": "ee0a240d2d0cff2f15cb243411e2f1e7d0c0b2c1",
                 "shasum": ""
             },
             "require": {
@@ -37,6 +37,9 @@
             },
             "type": "library",
             "autoload": {
+                "files": [
+                    "src/functions.php"
+                ],
                 "psr-4": {
                     "BlueFission\\": "src"
                 },
@@ -44,11 +47,7 @@
                     "src/"
                 ]
             },
-            "autoload-dev": {
-                "psr-4": {
-                    "BlueFission\\Tests\\": "tests/"
-                }
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "MIT"
             ],
@@ -60,20 +59,24 @@
                     "role": "Developer"
                 }
             ],
-            "description": "Core Framework for BlueFission.com internal PHP Projects",
+            "description": "DevElation primitives, behaviors, data, service, and framework utilities for Blue Fission PHP projects",
             "homepage": "https://github.com/BlueFissionTech/develation",
             "keywords": [
+                "behaviors",
                 "bluefission",
-                "core",
+                "data",
                 "develation",
                 "framework",
-                "php"
+                "materia",
+                "php",
+                "primitives",
+                "services"
             ],
             "support": {
                 "issues": "https://github.com/BlueFissionTech/develation/issues",
                 "source": "https://github.com/BlueFissionTech/develation"
             },
-            "time": "2026-06-25T00:36:03+00:00"
+            "time": "2026-07-05T19:08:43+00:00"
         },
         {
             "name": "composer/installers",
