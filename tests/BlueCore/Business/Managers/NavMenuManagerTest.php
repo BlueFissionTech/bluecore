@@ -2,6 +2,7 @@
 
 namespace BlueFission\Tests\BlueCore\Business\Managers;
 
+use BlueFission\Arr;
 use BlueFission\BlueCore\Auth;
 use BlueFission\BlueCore\Business\Managers\NavMenuManager;
 use BlueFission\BlueCore\MenuItem;
@@ -93,16 +94,16 @@ class FakeMenuAuthenticator extends Auth
 
     public function hasRole(string $role): bool
     {
-        return in_array($role, $this->roles, true);
+        return Arr::has($this->roles, $role, true);
     }
 
     public function isInGroup(string $group): bool
     {
-        return in_array($group, $this->groups, true);
+        return Arr::has($this->groups, $group, true);
     }
 
     public function hasPermission(string $permission): bool
     {
-        return in_array($permission, $this->permissions, true);
+        return Arr::has($this->permissions, $permission, true);
     }
 }

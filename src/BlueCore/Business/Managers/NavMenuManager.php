@@ -71,7 +71,7 @@ class NavMenuManager extends Service
             }
         }
 
-        return Arr::make($renderedItems)->join("\n")->val();
+        return Arr::isNotEmpty($renderedItems) ? implode("\n", $renderedItems) : '';
     }
 
     public function displayMenuItemBasedOnRole($menuId, $itemId, $role)
