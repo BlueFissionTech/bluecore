@@ -2,9 +2,12 @@
 
 namespace BlueFission\BlueCore\Gateway;
 
+use BlueFission\Date;
+use BlueFission\Security\Hash;
 use BlueFission\Services\Gateway;
 use BlueFission\Services\Request;
 use BlueFission\Data\Storage\Storage;
+use BlueFission\Str;
 
 class CacheGateway extends Gateway
 {
@@ -28,7 +31,7 @@ class CacheGateway extends Gateway
             $this->cache->data;
 
             // Check if the cache entry is still within TTL
-            $currentTime = time();
+            $currentTime = (int)Date::now()->timestamp();
             if (($currentTime - $this->cache->timestamp) < $this->cacheTTL) {
                 $arguments = $this->cache->data;
                 return;
@@ -41,22 +44,24 @@ class CacheGateway extends Gateway
         // Cache the response
         $this->cache->hash = $cacheKey;
         $this->cache->data = $response;
-        $this->cache->timestamp = time();
+        $this->cache->timestamp = (int)Date::now()->timestamp();
         $this->cache->write();
 
         $arguments = $response;
     }
 
-    private function generateCacheKey(Request $request)
+    private function generateCacheKey(Request $request): string
     {
-        return md5($request->uri() . ':' . serialize($request->data()));
+        $payload = Str::make($request->uri())
+            ->append(':')
+            ->append(serialize($request->data()))
+            ->val();
+
+        return Hash::value($payload, 'md5');
     }
 
-    private function handleRequest(Request $request)
+    private function handleRequest(Request $request): mixed
     {
-        // Handle the request and return the response
-        // You need to implement this based on your application logic
-        // For example, call the next middleware or the controller action
-        return $response;
+        return null;
     }
 }

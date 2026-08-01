@@ -1,16 +1,28 @@
 <?php
 use App\Business\Managers\CommunicationManager;
+use BlueFission\Arr;
+use BlueFission\Flag;
 use BlueFission\Utils\Util;
+use BlueFission\Utils\File;
+use BlueFission\Utils\Path;
 use BlueFission\Services\Application as App;
 use BlueFission\Str;
+use BlueFission\Val;
 
 
 if(!function_exists('import_env_vars')) {
 	function import_env_vars( $file ) {
-		$variables = file($file);
+		$variables = Str::make(File::readContents($file))->splitBy('/\r\n|\r|\n/')->val();
 		foreach ($variables as $var) {
-			putenv(trim($var));
-			list($name, $value) = explode("=", $var);
+			$var = Str::trim($var);
+			if (Val::isEmpty($var) || Str::startsWith($var, '#') || !Str::has($var, '=')) {
+				continue;
+			}
+
+			putenv($var);
+			$separator = Str::pos($var, '=');
+			$name = Str::sub($var, 0, $separator);
+			$value = Str::sub($var, $separator + 1);
 			$_ENV[$name] = $value;
 		}
 	}
@@ -21,7 +33,7 @@ if(!function_exists('env')) {
   {
       $value = getenv($key);
 
-      if ($value === false) {
+      if (Flag::isFalse($value)) {
           return $default;
       }
       return $value;
@@ -30,14 +42,14 @@ if(!function_exists('env')) {
 
 if (!function_exists( 'get_site_url' )) {
 	function get_site_url( $app_id = null, $path = '', $scheme = null ) {
-	    if ( empty( $app_id ) && isset($_SERVER['HTTPS']) && isset($_SERVER['HTTP_HOST']) ) {
+	    if ( Val::isEmpty($app_id) && Arr::hasKey($_SERVER, 'HTTPS') && Arr::hasKey($_SERVER, 'HTTP_HOST') ) {
 	        // $url = 'http://leads.local:8080';
-	        $url = ( (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] )  ? 'https://' : 'http://') . $_SERVER['HTTP_HOST'];
+	        $url = ( (Arr::hasKey($_SERVER, 'HTTPS') && $_SERVER['HTTPS'] )  ? 'https://' : 'http://') . $_SERVER['HTTP_HOST'];
 	    } else {
 	        $url = '/';
 	    }
 	 
-	    if ( $path && is_string( $path ) ) {
+	    if ( Val::isNotEmpty($path) && Str::is( $path ) ) {
 	        $url .= '/' . ltrim( $path, '/' );
 	    }
 	 
@@ -121,8 +133,8 @@ if(!function_exists('resolve_path')) {
 	    $rootPath = rtrim(APP_ROOT, DIRECTORY_SEPARATOR);
 	    $projectPath = rtrim(PROJECT_ROOT, DIRECTORY_SEPARATOR);
 
-	    $candidate = $rootPath . DIRECTORY_SEPARATOR . $pathInProject;
-	    $fallback = $projectPath . DIRECTORY_SEPARATOR . $pathInProject;
+	    $candidate = Path::normalize($rootPath . DIRECTORY_SEPARATOR . $pathInProject);
+	    $fallback = Path::normalize($projectPath . DIRECTORY_SEPARATOR . $pathInProject);
 
 	    if (file_exists($candidate)) {
 	        return $candidate;

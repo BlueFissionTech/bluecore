@@ -1,8 +1,10 @@
 <?php
 namespace BlueFission\BlueCore\Gateway;
 
+use BlueFission\Arr;
 use BlueFission\Services\Gateway;
 use BlueFission\Services\Request;
+use BlueFission\Val;
 
 class NoCsrfGateway extends Gateway {
 
@@ -14,12 +16,12 @@ class NoCsrfGateway extends Gateway {
         }
 
         // Generate a CSRF token if it doesn't exist
-        if (!isset($_SESSION['_token'])) {
+        if (!Arr::hasKey($_SESSION ?? [], '_token') || Val::isEmpty($_SESSION['_token'])) {
             $_SESSION['_token'] = bin2hex(random_bytes(32));
         }
 
         // Inject the CSRF token into the request
-        if (count($_POST) > 0) {
+        if (Arr::isNotEmpty($_POST)) {
             $_POST['_token'] = $_SESSION['_token'];
         } else {
             $_SERVER['HTTP_X_CSRF_TOKEN'] = $_SESSION['_token'];
