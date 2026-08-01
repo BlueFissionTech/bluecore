@@ -6,6 +6,7 @@ use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\Services\Service;
 use BlueFission\BlueCore\Auth as Authenticator;
 use BlueFission\BlueCore\MenuItem;
+use BlueFission\Val;
 
 class NavMenuManager extends Service
 {
@@ -57,9 +58,9 @@ class NavMenuManager extends Service
 
                     // Check role, group, and permission against current user
                     if (
-                        ($requiredRole && !$this->_authenticator->hasRole($requiredRole)) ||
-                        ($requiredGroup && !$this->_authenticator->isInGroup($requiredGroup)) ||
-                        ($requiredPermission && !$this->_authenticator->hasPermission($requiredPermission))
+                        (Val::isNotEmpty($requiredRole) && !$this->_authenticator->hasRole($requiredRole)) ||
+                        (Val::isNotEmpty($requiredGroup) && !$this->_authenticator->isInGroup($requiredGroup)) ||
+                        (Val::isNotEmpty($requiredPermission) && !$this->_authenticator->hasPermission($requiredPermission))
                     ) {
                         continue; // Skip this item if user does not meet requirements
                     }
@@ -70,7 +71,7 @@ class NavMenuManager extends Service
             }
         }
 
-        return implode("\n", $renderedItems);
+        return Arr::isNotEmpty($renderedItems) ? implode("\n", $renderedItems) : '';
     }
 
     public function displayMenuItemBasedOnRole($menuId, $itemId, $role)
