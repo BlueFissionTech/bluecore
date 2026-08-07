@@ -5,6 +5,8 @@ use BlueFission\Services\Service;
 use BlueFission\Collections\Collection;
 use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\Data\Storage\Storage;
+use BlueFission\Arr;
+use BlueFission\Val;
 
 class DatasourceManager extends Service {
 
@@ -45,11 +47,10 @@ class DatasourceManager extends Service {
 		$storedDeltas = $this->getDeltasFromDB($iteration);
 		$iteration++;
 
-		$deltasToIgnore = (new Collection($storedDeltas))->map(function($delta) {
-			return $delta;
-		})->toArray();
-
-		$deltas = array_diff($deltas, $deltasToIgnore);
+		$deltas = Arr::make($deltas)
+			->diff($storedDeltas)
+			->values()
+			->toArray();
 
 		$dbActive = false;
 		if ( MySQLLink::tableExists('migrations') ) {
@@ -214,23 +215,47 @@ class DatasourceManager extends Service {
 			->order('migration_id', 'DESC')
 			->read();
 
-		if ( $this->_db->result() && $this->_db->result()->count() > 0 ) {
-			$iteration = $this->_db->result()->first()?->iteration ?: 1;
+		return $this->migrationHistory($this->_db->result()->toArray(), $iteration);
+	}
+
+	protected function migrationHistory(array $rows, &$iteration): array
+	{
+		$records = new Collection($rows);
+		$iterations = $records
+			->map(fn($row) => (int)$this->migrationField($row, 'iteration', 0))
+			->toArray();
+
+		if (Arr::isNotEmpty($iterations)) {
+			$iteration = Arr::max($iterations);
 		}
 
-		$batch = $this->_db->result()->map(function($row) use ($iteration) {
-			if ( $row['iteration']!= $iteration ) {
-				return null;
-			}
-			return $row['name'];
-		})
-		->filter(function($delta) {
-			return $delta !== null;
-		});
+		$names = $records
+			->filter(fn($row) => (int)$this->migrationField($row, 'status', 0) === 2)
+			->map(fn($row) => $this->migrationField($row, 'name'))
+			->filter(fn($name) => Val::isNotEmpty($name))
+			->toArray();
 
-		$deltas = $batch->count() > 0 ? $batch->toArray() : [];
+		return Arr::make($names)
+			->unique()
+			->values()
+			->toArray();
+	}
 
-		return $deltas;
+	private function migrationField(mixed $row, string $field, mixed $default = null): mixed
+	{
+		if (Arr::is($row)) {
+			return Arr::getPath($row, $field, $default);
+		}
+
+		if ($row instanceof \ArrayAccess && $row->offsetExists($field)) {
+			return $row[$field];
+		}
+
+		if (is_object($row)) {
+			return $row->{$field} ?? $default;
+		}
+
+		return $default;
 	}
 
 	private function loadGenerators()
