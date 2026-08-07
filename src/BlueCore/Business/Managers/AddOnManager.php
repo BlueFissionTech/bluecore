@@ -5,6 +5,7 @@ namespace BlueFission\BlueCore\Business\Managers;
 use BlueFission\Arr;
 use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\Data\FileSystem;
+use BlueFission\Data\Storage\Storage;
 use BlueFission\Services\Service;
 use BlueFission\Utils\Loader;
 use BlueFission\Utils\File;
@@ -33,6 +34,16 @@ class AddOnManager extends Service
     {
         $data = $this->getAddOnData($name);
         $result = $this->lifecycleResult('install', $data->name);
+
+        if ($this->isInstalled($data->name)) {
+            $result['stage'] = 'complete';
+            $result['messages'][] = 'Add-on is already installed.';
+            $result['modelStatus'] = $this->_model->status();
+            $result['query'] = $this->_model->query();
+
+            return $result;
+        }
+
         $dependencyCommands = $this->dependencyCommands($data->libraries, 'require');
         $result['dependencies'] = $dependencyCommands;
 
@@ -48,7 +59,7 @@ class AddOnManager extends Service
         $addon->assign($data);
         $addon->path = resolve_path('addons' . DIRECTORY_SEPARATOR . $name);
 
-        $datasource = instance('datasource');
+        $datasource = $this->datasourceManager();
         $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
         $datasource->setGeneratorDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR);
         ob_start();
@@ -59,6 +70,8 @@ class AddOnManager extends Service
 
         $this->callHook($addon, 'install');
         $this->_model->write($addon);
+        $result['changed'] = true;
+        $result['stage'] = 'complete';
         $result['modelStatus'] = $this->_model->status();
         $result['query'] = $this->_model->query();
 
@@ -70,9 +83,7 @@ class AddOnManager extends Service
         $addOns = $this->showAllAddOns();
         $results = [];
         foreach ($addOns as $addOn) {
-            if (!$this->_model->exists(['name' => $addOn->name])) {
-                $results[] = $this->install($addOn->name, $installDependencies);
-            }
+            $results[] = $this->install($addOn->name, $installDependencies);
         }
         return $results;
     }
@@ -82,31 +93,44 @@ class AddOnManager extends Service
         $addon = $this->getAddOnById($addOnId);
         $result = $this->lifecycleResult('uninstall', $addon->name);
 
-        // Check for and call the `uninstall` function hook
-        $this->callHook($addon, 'uninstall');
+        try {
+            $result['stage'] = 'hook';
+            $this->callHook($addon, 'uninstall');
 
-        $this->_model->delete(['addon_id' => $addOnId]);
+            $result['stage'] = 'definition';
+            $data = $this->getAddOnData($addon->name);
+            $dependencyCommands = $this->dependencyCommands($data->libraries, 'remove');
+            $result['dependencies'] = $dependencyCommands;
 
-        $data = $this->getAddOnData($addon->name);
-        $dependencyCommands = $this->dependencyCommands($data->libraries, 'remove');
-        $result['dependencies'] = $dependencyCommands;
-
-        if (Arr::isNotEmpty($dependencyCommands)) {
-            if ($removeDependencies) {
-                $result['messages'][] = $this->runDependencyCommands($dependencyCommands);
-            } else {
-                $result['messages'][] = 'Dependency removal skipped; run the listed commands explicitly if required.';
+            if (Arr::isNotEmpty($dependencyCommands)) {
+                if ($removeDependencies) {
+                    $result['stage'] = 'dependencies';
+                    $result['messages'][] = $this->runDependencyCommands($dependencyCommands);
+                } else {
+                    $result['messages'][] = 'Dependency removal skipped; run the listed commands explicitly if required.';
+                }
             }
-        }
 
-        $datasource = instance('datasource');
-        $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
-        $datasource->setGeneratorDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR);
-        ob_start();
-        // $datasource->revertMigrations();
-        $datasource->revertBatch($addon->name);
-        $result['messages'][] = ob_get_contents();
-        ob_end_clean();
+            $result['stage'] = 'datasource';
+            $datasource = $this->datasourceManager();
+            $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
+            $datasource->setGeneratorDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR);
+            $result['messages'][] = $this->captureOutput(fn() => $datasource->revertBatch($addon->name));
+
+            $result['stage'] = 'registration';
+            $this->_model->delete(['addon_id' => $addOnId]);
+            if ($this->_model->status() !== Storage::STATUS_SUCCESS) {
+                throw new \RuntimeException('Add-on registration could not be removed.');
+            }
+
+            $result['changed'] = true;
+            $result['stage'] = 'complete';
+        } catch (\Throwable $exception) {
+            $result['ok'] = false;
+            $result['nextAction'] = 'retry_uninstall';
+            $result['error'] = $exception->getMessage();
+            $result['messages'][] = $exception->getMessage();
+        }
 
         $result['modelStatus'] = $this->_model->status();
 
@@ -122,7 +146,7 @@ class AddOnManager extends Service
 
     public function activateAll(): array
     {
-        $addOns = $this->_model->getAllAddOns();
+        $addOns = $this->installedAddOns();
         $results = [];
         foreach ($addOns as $addOn) {
             if (!$addOn->is_active) {
@@ -290,7 +314,43 @@ class AddOnManager extends Service
         return $library;
     }
 
-    private function runDependencyCommands(array $commands): string
+    protected function isInstalled(string $name): bool
+    {
+        $this->_model->clear();
+        $this->_model->read(['name' => $name]);
+
+        return Val::isNotEmpty($this->_model->id());
+    }
+
+    protected function installedAddOns(): mixed
+    {
+        $this->_model->clear();
+        $this->_model->read();
+
+        return $this->_model->all();
+    }
+
+    protected function datasourceManager(): mixed
+    {
+        return instance('datasource');
+    }
+
+    protected function captureOutput(callable $operation): string
+    {
+        ob_start();
+
+        try {
+            $operation();
+
+            return (string)ob_get_clean();
+        } catch (\Throwable $exception) {
+            ob_end_clean();
+
+            throw $exception;
+        }
+    }
+
+    protected function runDependencyCommands(array $commands): string
     {
         $system = new System();
         $system->cwd(APP_ROOT);
@@ -310,6 +370,10 @@ class AddOnManager extends Service
             'ok' => true,
             'action' => $action,
             'addon' => $addOn,
+            'changed' => false,
+            'stage' => 'pending',
+            'nextAction' => null,
+            'error' => null,
             'messages' => [],
             'dependencies' => [],
             'modelStatus' => $modelStatus,
