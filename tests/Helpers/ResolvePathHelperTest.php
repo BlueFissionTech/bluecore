@@ -4,22 +4,15 @@ namespace BlueFission\Tests\Helpers;
 
 use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
-use PHPUnit\Framework\Attributes\PreserveGlobalState;
-use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 
 class ResolvePathHelperTest extends TestCase
 {
-    #[RunInSeparateProcess]
-    #[PreserveGlobalState(false)]
     public function testApplicationPathsAndWildcardsResolveBeforeProjectFallback(): void
     {
         $root = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'bluecore-resolve-path-' . uniqid();
         $applicationRoot = $root . DIRECTORY_SEPARATOR . 'application';
         $projectRoot = $root . DIRECTORY_SEPARATOR . 'project';
-
-        define('APP_ROOT', $applicationRoot);
-        define('PROJECT_ROOT', $projectRoot);
 
         File::ensureFile(
             $applicationRoot . DIRECTORY_SEPARATOR . 'common' . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR . 'app.php',
@@ -34,23 +27,23 @@ class ResolvePathHelperTest extends TestCase
 
         $this->assertSame(
             Path::normalize($applicationRoot . DIRECTORY_SEPARATOR . 'common/config/app.php'),
-            resolve_path('common/config/app.php')
+            resolve_path('common/config/app.php', $applicationRoot, $projectRoot)
         );
         $this->assertSame(
             Path::normalize($applicationRoot . DIRECTORY_SEPARATOR . 'common/config/*.php'),
-            resolve_path('common/config/*.php')
+            resolve_path('common/config/*.php', $applicationRoot, $projectRoot)
         );
         $this->assertSame(
             Path::normalize($applicationRoot . DIRECTORY_SEPARATOR . 'common/config/*.php'),
-            resolve_path('common\\config/*.php')
+            resolve_path('common\\config/*.php', $applicationRoot, $projectRoot)
         );
         $this->assertSame(
             Path::normalize($projectRoot . DIRECTORY_SEPARATOR . 'common/config/missing-*.php'),
-            resolve_path('common/config/missing-*.php')
+            resolve_path('common/config/missing-*.php', $applicationRoot, $projectRoot)
         );
         $this->assertSame(
             Path::normalize($projectRoot . DIRECTORY_SEPARATOR . 'common/config/[invalid.php'),
-            resolve_path('common/config/[invalid.php')
+            resolve_path('common/config/[invalid.php', $applicationRoot, $projectRoot)
         );
 
         $this->removeDir($root);

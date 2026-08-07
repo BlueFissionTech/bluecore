@@ -129,10 +129,10 @@ if (!function_exists('whisper')) {
 }
 
 if(!function_exists('resolve_path')) {
-	function resolve_path($pathInProject)
+	function resolve_path($pathInProject, ?string $applicationRoot = null, ?string $legacyProjectRoot = null)
 	{
-	    $rootPath = rtrim(APP_ROOT, DIRECTORY_SEPARATOR);
-	    $projectPath = rtrim(PROJECT_ROOT, DIRECTORY_SEPARATOR);
+	    $rootPath = rtrim($applicationRoot ?? APP_ROOT, DIRECTORY_SEPARATOR);
+	    $projectPath = rtrim($legacyProjectRoot ?? PROJECT_ROOT, DIRECTORY_SEPARATOR);
 	    $relativePath = Path::normalize((string)$pathInProject);
 
 	    $candidate = Path::normalize($rootPath . DIRECTORY_SEPARATOR . $relativePath);
