@@ -84,6 +84,23 @@ class AddOnManagerTest extends TestCase
         $manager->definition('missing');
     }
 
+    public function testAddOnPathsArePortableAndRemainWithinTheConfiguredRoot(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+        $definitionDir = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'demo';
+        Path::ensureDir($definitionDir);
+
+        $path = $manager->path('demo');
+
+        $this->assertStringNotContainsString('\\', $path);
+        $this->assertStringEndsWith('/addons/demo', $path);
+
+        Path::ensureDir(self::$root . DIRECTORY_SEPARATOR . 'outside');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $manager->path('../outside');
+    }
+
     public function testActivateAndActivateAllReturnStructuredStatuses(): void
     {
         $model = new FakeAddOnModel([
@@ -227,6 +244,11 @@ class TestableAddOnManager extends AddOnManager
     public function definition(string $name): object
     {
         return $this->getAddOnData($name);
+    }
+
+    public function path(string $name): string
+    {
+        return $this->addOnPath($name);
     }
 
     protected function datasourceManager(): mixed
