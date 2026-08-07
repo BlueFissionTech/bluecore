@@ -3,6 +3,7 @@
 namespace BlueFission\Tests\BlueCore\Business\Managers;
 
 use BlueFission\BlueCore\Business\Managers\AddOnManager;
+use BlueFission\BlueCore\Domain\AddOn\AddOn;
 use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
 use PHPUnit\Framework\TestCase;
@@ -99,6 +100,78 @@ class AddOnManagerTest extends TestCase
 
         $this->expectException(\InvalidArgumentException::class);
         $manager->path('../outside');
+    }
+
+    public function testNamespacedHookResolutionAndLegacyFallbackReturnDiagnostics(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+        $namespacedPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'namespaced';
+        File::ensureFile(
+            $namespacedPath . DIRECTORY_SEPARATOR . 'main.php',
+            "<?php\nnamespace BlueFission\\Tests\\Fixtures\\AddOnHooks;\nfunction demo_install() { \$GLOBALS['bluecore_hook_calls'][] = 'namespaced'; }",
+            true
+        );
+        $namespaced = new AddOn();
+        $namespaced->assign([
+            'name' => 'demo',
+            'namespace' => 'BlueFission\\Tests\\Fixtures\\AddOnHooks',
+            'path' => $namespacedPath,
+            'primary_file' => 'main.php',
+        ]);
+
+        $namespacedResult = $manager->hook($namespaced, 'install');
+
+        $this->assertTrue($namespacedResult['ok']);
+        $this->assertSame('namespaced', $namespacedResult['strategy']);
+        $this->assertSame(
+            'BlueFission\\Tests\\Fixtures\\AddOnHooks\\demo_install',
+            $namespacedResult['callable']
+        );
+
+        $legacyPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'legacy';
+        File::ensureFile(
+            $legacyPath . DIRECTORY_SEPARATOR . 'main.php',
+            "<?php\nfunction legacydemo_install() { \$GLOBALS['bluecore_hook_calls'][] = 'legacy'; }",
+            true
+        );
+        $legacy = new AddOn();
+        $legacy->assign([
+            'name' => 'legacydemo',
+            'namespace' => 'Missing\\Namespace',
+            'path' => $legacyPath,
+            'primary_file' => 'main.php',
+        ]);
+
+        $legacyResult = $manager->hook($legacy, 'install');
+
+        $this->assertTrue($legacyResult['ok']);
+        $this->assertSame('legacy', $legacyResult['strategy']);
+        $this->assertSame('legacydemo_install', $legacyResult['callable']);
+        $this->assertSame(['namespaced', 'legacy'], $GLOBALS['bluecore_hook_calls']);
+    }
+
+    public function testMissingHookReturnsStructuredDiagnostics(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'missing-hook';
+        File::ensureFile($path . DIRECTORY_SEPARATOR . 'main.php', '<?php', true);
+        $addOn = new AddOn();
+        $addOn->assign([
+            'name' => 'missing',
+            'namespace' => 'Vendor\\Package',
+            'path' => $path,
+            'primary_file' => 'main.php',
+        ]);
+
+        $result = $manager->hook($addOn, 'install');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('missing_callable', $result['status']);
+        $this->assertSame(
+            ['Vendor\\Package\\missing_install', 'missing_install'],
+            $result['attempted']
+        );
+        $this->assertNotEmpty($result['error']);
     }
 
     public function testActivateAndActivateAllReturnStructuredStatuses(): void
@@ -251,14 +324,16 @@ class TestableAddOnManager extends AddOnManager
         return $this->addOnPath($name);
     }
 
+    public function hook(AddOn $addOn, string $hook): array
+    {
+        return $this->callHook($addOn, $hook);
+    }
+
     protected function datasourceManager(): mixed
     {
         return $this->datasource;
     }
 
-    protected function callHook(\BlueFission\BlueCore\Domain\AddOn\AddOn $addOn, $hook): void
-    {
-    }
 }
 
 class FakeAddOnModel

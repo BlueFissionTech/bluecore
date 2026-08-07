@@ -5,7 +5,9 @@ use BlueFission\Services\Service;
 use BlueFission\Collections\Collection;
 use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\Data\Storage\Storage;
+use BlueFission\Utils\File;
 use BlueFission\Arr;
+use BlueFission\Str;
 use BlueFission\Val;
 
 class DatasourceManager extends Service {
@@ -174,16 +176,15 @@ class DatasourceManager extends Service {
 		}
 
 		$generators = $this->loadGenerators();
-		if ( in_array('RootSeeder.php', $generators) ) {
+		if ( Arr::has($generators, 'RootSeeder.php', true) ) {
 			$classname = $this->findClassName( $this->_generatorDir . 'RootSeeder.php' );
 			if ( $classname ) {
 				include_once($this->_generatorDir . 'RootSeeder.php');
 				$object = \App::makeInstance($classname);
 				if ( method_exists($object, 'seeders') ) {
-					$generators = call_user_func([$object, 'seeders']);
-					array_walk($generators, function(&$generator) {
-						$generator = $generator.'.php';
-					});
+					$generators = Arr::make(call_user_func([$object, 'seeders']))
+						->map(fn ($generator) => Str::endsWith($generator, '.php') ? $generator : $generator . '.php')
+						->toArray();
 				}
 			}
 		}
@@ -192,7 +193,7 @@ class DatasourceManager extends Service {
 			$classname = '';
 
 			if ( strpos($generator, '.') !== 0 ) {
-				$generator = strpos($generator, '.php') ? $generator : $generator . '.php';
+				$generator = Str::endsWith($generator, '.php') ? $generator : $generator . '.php';
 				
 				$classname = $this->findClassName( $this->_generatorDir . $generator );
 				if ( $classname ) {
@@ -269,41 +270,74 @@ class DatasourceManager extends Service {
 		return scandir($this->_deltaDir, $reverse);
 	}
 
-	// https://stackoverflow.com/questions/7153000/get-class-name-from-file
-	private function findClassName( $file )
+	protected function findClassName($file): ?string
 	{
-		$fp = fopen($file, 'r');
-		$class = $namespace = $buffer = '';
-		$i = 0;
-		while (!$class) {
-		    if (feof($fp)) break;
-
-		    $buffer .= fread($fp, 512);
-		    $tokens = token_get_all($buffer);
-
-		    if (strpos($buffer, '{') === false) continue;
-
-		    for (;$i<count($tokens);$i++) {
-		        if ($tokens[$i][0] === T_NAMESPACE) {
-		            for ($j=$i+1;$j<count($tokens); $j++) {
-		                if ($tokens[$j][0] === T_STRING) {
-		                     $namespace .= '\\'.$tokens[$j][1];
-		                } else if ($tokens[$j] === '{' || $tokens[$j] === ';') {
-		                     break;
-		                }
-		            }
-		        }
-
-		        if ($tokens[$i][0] === T_CLASS) {
-		            for ($j=$i+1;$j<count($tokens);$j++) {
-		                if ($tokens[$j] === '{') {
-		                    $class = $tokens[$i+2][1];
-		                }
-		            }
-		        }
-		    }
+		if (!(new File())->isReachable($file)) {
+			return null;
 		}
 
-		return $class;
+		$tokens = token_get_all(File::readContents($file));
+		$namespace = '';
+		$previousToken = null;
+
+		foreach ($tokens as $index => $token) {
+			if (!Arr::is($token)) {
+				continue;
+			}
+
+			$tokenType = Arr::getPath($token, '0');
+			if ($tokenType === T_NAMESPACE) {
+				$namespace = $this->namespaceFromTokens($tokens, $index + 1);
+			}
+
+			if ($tokenType === T_CLASS && !Arr::has([T_NEW, T_DOUBLE_COLON], $previousToken, true)) {
+				$class = $this->classFromTokens($tokens, $index + 1);
+				if (Val::isNotEmpty($class)) {
+					return Str::trim(
+						Val::isEmpty($namespace) ? $class : "{$namespace}\\{$class}",
+						'\\'
+					);
+				}
+			}
+
+			if (!Arr::has([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], $tokenType, true)) {
+				$previousToken = $tokenType;
+			}
+		}
+
+		return null;
+	}
+
+	private function namespaceFromTokens(array $tokens, int $offset): string
+	{
+		$namespace = '';
+		for ($index = $offset, $size = Arr::size($tokens); $index < $size; $index++) {
+			$token = $tokens[$index];
+			if ($token === ';' || $token === '{') {
+				break;
+			}
+
+			if (Arr::is($token) && Arr::has([T_STRING, T_NAME_QUALIFIED, T_NS_SEPARATOR], $token[0], true)) {
+				$namespace .= $token[1];
+			}
+		}
+
+		return Str::trim($namespace, '\\');
+	}
+
+	private function classFromTokens(array $tokens, int $offset): ?string
+	{
+		for ($index = $offset, $size = Arr::size($tokens); $index < $size; $index++) {
+			$token = $tokens[$index];
+			if ($token === '{') {
+				break;
+			}
+
+			if (Arr::is($token) && $token[0] === T_STRING) {
+				return $token[1];
+			}
+		}
+
+		return null;
 	}
 }
