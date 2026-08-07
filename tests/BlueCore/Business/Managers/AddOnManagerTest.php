@@ -5,6 +5,7 @@ namespace BlueFission\Tests\BlueCore\Business\Managers;
 use BlueFission\BlueCore\Business\Managers\AddOnManager;
 use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 class AddOnManagerTest extends TestCase
@@ -77,11 +78,67 @@ class AddOnManagerTest extends TestCase
         $definition = $manager->definition('demo');
 
         $this->assertSame('demo', $definition->name);
+        $this->assertSame('0.0.0', $definition->version);
+        $this->assertSame('', $definition->namespace);
         $this->assertSame('main.php', $definition->primary_file);
         $this->assertSame(['bluefission/develation'], $definition->libraries);
 
         $this->expectException(\InvalidArgumentException::class);
         $manager->definition('missing');
+    }
+
+    #[DataProvider('invalidDefinitionProvider')]
+    public function testDefinitionValidationIdentifiesInvalidFields(array $definition, string $field): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+        File::ensureFile(
+            self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'demo' . DIRECTORY_SEPARATOR . 'definition.json',
+            json_encode($definition),
+            true
+        );
+
+        try {
+            $manager->definition('demo');
+            $this->fail('Expected definition validation to fail.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString("field '{$field}'", $exception->getMessage());
+        }
+    }
+
+    public static function invalidDefinitionProvider(): array
+    {
+        return [
+            'mismatched name' => [['name' => 'other'], 'name'],
+            'invalid version type' => [['name' => 'demo', 'version' => []], 'version'],
+            'invalid namespace' => [['name' => 'demo', 'namespace' => 'Vendor\\Bad-Name'], 'namespace'],
+            'escaping primary file' => [['name' => 'demo', 'primary_file' => '../main.php'], 'primary_file'],
+            'invalid libraries type' => [['name' => 'demo', 'libraries' => 'vendor/package'], 'libraries'],
+            'invalid library name' => [['name' => 'demo', 'libraries' => ['Bad Package']], 'libraries'],
+        ];
+    }
+
+    public function testMalformedDefinitionAndUnsafeDirectoryFailBeforeLifecycleMutation(): void
+    {
+        $model = new FakeAddOnModel();
+        $datasource = new FakeDatasourceManager();
+        $manager = new TestableAddOnManager($model, $datasource);
+        File::ensureFile(
+            self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'demo' . DIRECTORY_SEPARATOR . 'definition.json',
+            '{invalid',
+            true
+        );
+
+        foreach (['demo', '../outside'] as $name) {
+            try {
+                $manager->install($name);
+                $this->fail('Expected definition validation to fail.');
+            } catch (\InvalidArgumentException $exception) {
+                $this->assertStringContainsString('Invalid add-on definition', $exception->getMessage());
+            }
+        }
+
+        $this->assertSame(0, $datasource->migrationRuns);
+        $this->assertSame([], $model->writes);
     }
 
     public function testAddOnPathsArePortableAndRemainWithinTheConfiguredRoot(): void

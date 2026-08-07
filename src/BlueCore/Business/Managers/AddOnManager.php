@@ -6,6 +6,7 @@ use BlueFission\Arr;
 use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\Data\FileSystem;
 use BlueFission\Data\Storage\Storage;
+use BlueFission\Net\HTTP;
 use BlueFission\Services\Service;
 use BlueFission\Utils\Loader;
 use BlueFission\Utils\File;
@@ -32,8 +33,8 @@ class AddOnManager extends Service
 
     public function install($name, bool $installDependencies = false): array
     {
-        $addOnPath = $this->addOnPath((string)$name);
         $data = $this->getAddOnData($name);
+        $addOnPath = $this->addOnPath($data->name);
         $result = $this->lifecycleResult('install', $data->name);
 
         if ($this->isInstalled($data->name)) {
@@ -271,24 +272,135 @@ class AddOnManager extends Service
 
     protected function getAddOnData($name)
     {
+        $name = $this->normalizeAddOnIdentifier($name, 'name');
         $definitionPath = resolve_path('addons' . DIRECTORY_SEPARATOR . $name  . DIRECTORY_SEPARATOR . 'definition.json');
         if (!(new File())->isReachable($definitionPath)) {
             throw new \InvalidArgumentException("Add-on definition not found for {$name}.");
         }
 
-        $data = json_decode(File::readContents($definitionPath));
-        if (!$data || json_last_error() !== JSON_ERROR_NONE) {
-            throw new \RuntimeException("Add-on definition is invalid JSON for {$name}.");
+        $contents = File::readContents($definitionPath);
+        $decodedObject = HTTP::jsonDecode($contents, false);
+        if (!is_object($decodedObject)) {
+            throw $this->invalidDefinition('definition', 'a valid JSON object');
         }
 
-        if (Val::isEmpty($data->name ?? null)) {
-            $data->name = $name;
+        $definition = Arr::make(HTTP::jsonDecode($contents, true, []));
+        $rawName = $definition->get('name');
+        if (Val::isNotNull($rawName) && !Str::is($rawName)) {
+            throw $this->invalidDefinition('name', 'a safe add-on identifier');
+        }
+        $definedName = Val::isEmpty($rawName)
+            ? $name
+            : $this->normalizeAddOnIdentifier($rawName, 'name');
+
+        if ($definedName !== $name) {
+            throw $this->invalidDefinition('name', 'the add-on directory identifier');
         }
 
-        $data->libraries = Arr::toArray($data->libraries ?? [], true);
-        $data->primary_file = $data->primary_file ?? 'main.php';
+        $rawVersion = $definition->get('version');
+        if (Val::isNotNull($rawVersion) && !Str::is($rawVersion)) {
+            throw $this->invalidDefinition('version', 'a semantic version string');
+        }
+        $version = Val::isEmpty($rawVersion)
+            ? '0.0.0'
+            : Str::trim($rawVersion);
+        if (!Str::matchPattern($version, '/^[0-9]+(?:\.[0-9]+){0,3}(?:[-+][0-9A-Za-z.-]+)?$/')) {
+            throw $this->invalidDefinition('version', 'a semantic version string');
+        }
 
-        return $data;
+        $rawNamespace = $definition->get('namespace');
+        if (Val::isNotNull($rawNamespace) && !Str::is($rawNamespace)) {
+            throw $this->invalidDefinition('namespace', 'a valid PHP namespace');
+        }
+        $namespace = Val::isEmpty($rawNamespace)
+            ? ''
+            : Str::trim($rawNamespace, '\\');
+        if (Val::isNotEmpty($namespace) && !Str::matchPattern(
+            $namespace,
+            '/^(?:[A-Za-z_][A-Za-z0-9_]*)(?:\\\\[A-Za-z_][A-Za-z0-9_]*)*$/'
+        )) {
+            throw $this->invalidDefinition('namespace', 'a valid PHP namespace');
+        }
+
+        $rawPrimaryFile = $definition->get('primary_file');
+        if (Val::isNotNull($rawPrimaryFile) && !Str::is($rawPrimaryFile)) {
+            throw $this->invalidDefinition('primary_file', 'a relative path within the add-on root');
+        }
+        $primaryFile = Val::isEmpty($rawPrimaryFile)
+            ? 'main.php'
+            : $this->normalizeDefinitionPath($rawPrimaryFile, 'primary_file');
+
+        $libraries = $definition->get('libraries');
+        if (Val::isNull($libraries)) {
+            $libraries = [];
+        }
+        if (!Arr::is($libraries)) {
+            throw $this->invalidDefinition('libraries', 'an array of Composer package names');
+        }
+
+        $libraries = Arr::make($libraries)
+            ->map(function ($library) {
+                if (!Str::is($library)) {
+                    throw $this->invalidDefinition('libraries', 'an array of Composer package names');
+                }
+
+                $normalized = $this->sanitizeLibraryName($library);
+                if (Val::isNull($normalized)) {
+                    throw $this->invalidDefinition('libraries', 'an array of Composer package names');
+                }
+
+                return $normalized;
+            })
+            ->unique()
+            ->values()
+            ->toArray();
+
+        return (object)Arr::make([
+            'name' => $definedName,
+            'version' => $version,
+            'namespace' => $namespace,
+            'primary_file' => $primaryFile,
+            'libraries' => $libraries,
+            'description' => (string)($definition->get('description') ?? ''),
+        ])->toArray();
+    }
+
+    private function normalizeAddOnIdentifier(mixed $identifier, string $field): string
+    {
+        if (!Str::is($identifier)) {
+            throw $this->invalidDefinition($field, 'a safe add-on identifier');
+        }
+
+        $identifier = Str::trim($identifier);
+        if (!Str::matchPattern($identifier, '/^[A-Za-z0-9][A-Za-z0-9._-]*$/')) {
+            throw $this->invalidDefinition($field, 'a safe add-on identifier');
+        }
+
+        return $identifier;
+    }
+
+    private function normalizeDefinitionPath(mixed $path, string $field): string
+    {
+        if (!Str::is($path)) {
+            throw $this->invalidDefinition($field, 'a relative path within the add-on root');
+        }
+
+        $path = Path::normalize(Str::trim($path));
+        $segments = Str::make($path)->split(DIRECTORY_SEPARATOR)->val();
+        $isAbsolute = Str::startsWith($path, DIRECTORY_SEPARATOR)
+            || Str::matchPattern($path, '/^[A-Za-z]:/')
+            || Arr::has($segments, '..', true);
+
+        if (Val::isEmpty($path) || $isAbsolute) {
+            throw $this->invalidDefinition($field, 'a relative path within the add-on root');
+        }
+
+        return Str::replace($path, '\\', '/');
+    }
+
+    private function invalidDefinition(string $field, string $expected): \InvalidArgumentException
+    {
+        return new \InvalidArgumentException("Invalid add-on definition field '{$field}': expected {$expected}.");
     }
 
     protected function addOnPath(string $name): string
