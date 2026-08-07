@@ -31,6 +31,7 @@ class AddOnManager extends Service
 
     public function install($name, bool $installDependencies = false): array
     {
+        $addOnPath = $this->addOnPath((string)$name);
         $data = $this->getAddOnData($name);
         $result = $this->lifecycleResult('install', $data->name);
         $dependencyCommands = $this->dependencyCommands($data->libraries, 'require');
@@ -46,7 +47,7 @@ class AddOnManager extends Service
 
         $addon = new AddOn;
         $addon->assign($data);
-        $addon->path = resolve_path('addons' . DIRECTORY_SEPARATOR . $name);
+        $addon->path = $addOnPath;
 
         $datasource = instance('datasource');
         $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
@@ -161,7 +162,7 @@ class AddOnManager extends Service
             $model = new AddOn;
             $model->name = $data->name ?? $addOn;
             $model->description = Str::truncate($data->description ?? "");
-            $model->path = resolve_path('addons' . DIRECTORY_SEPARATOR . $addOn);
+            $model->path = $this->addOnPath($addOn);
             $model->primary_file = 'main.php';
             // $addOn = $model;
             $list[$data->name] = $model;
@@ -264,6 +265,28 @@ class AddOnManager extends Service
         $data->primary_file = $data->primary_file ?? 'main.php';
 
         return $data;
+    }
+
+    protected function addOnPath(string $name): string
+    {
+        $root = realpath(resolve_path('addons'));
+        $path = realpath(resolve_path('addons' . DIRECTORY_SEPARATOR . $name));
+
+        if (Val::isEmpty($root) || Val::isEmpty($path)) {
+            throw new \InvalidArgumentException("Add-on path not found for {$name}.");
+        }
+
+        $root = Path::normalize($root);
+        $path = Path::normalize($path);
+        $rootPrefix = Str::endsWith($root, DIRECTORY_SEPARATOR)
+            ? $root
+            : $root . DIRECTORY_SEPARATOR;
+
+        if ($path !== $root && !Str::startsWith($path, $rootPrefix)) {
+            throw new \InvalidArgumentException("Add-on path escapes the configured root for {$name}.");
+        }
+
+        return Str::replace($path, '\\', '/');
     }
 
     protected function dependencyCommands(array $libraries, string $operation): array
