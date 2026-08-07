@@ -20,6 +20,7 @@ class DatasourceManager extends Service {
 		$this->_generatorDir = resolve_path('datasources/generator/');
 		$this->_db = $storage;
 		$this->_db->config('name', 'migrations');
+		$this->_db->activate();
 	}
 
 	public function setDeltaDirectory( $directory )
