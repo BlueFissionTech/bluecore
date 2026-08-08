@@ -6,6 +6,7 @@ use BlueFission\Arr;
 use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\Data\FileSystem;
 use BlueFission\Data\Storage\Storage;
+use BlueFission\Func;
 use BlueFission\Net\HTTP;
 use BlueFission\Flag;
 use BlueFission\Services\Service;
@@ -71,7 +72,10 @@ class AddOnManager extends Service
         $result['messages'][] = ob_get_contents();
         ob_end_clean();
 
-        $this->callHook($addon, 'install');
+        $hookResult = $this->callHook($addon, 'install');
+        if (Arr::is($hookResult)) {
+            $result['hooks'][] = $hookResult;
+        }
         $this->_model->write($addon);
         $result['changed'] = true;
         $result['stage'] = 'complete';
@@ -103,7 +107,10 @@ class AddOnManager extends Service
 
         try {
             $result['stage'] = 'hook';
-            $this->callHook($addon, 'uninstall');
+            $hookResult = $this->callHook($addon, 'uninstall');
+            if (Arr::is($hookResult)) {
+                $result['hooks'][] = $hookResult;
+            }
 
             $result['stage'] = 'definition';
             $data = $this->getAddOnData($addon->name);
@@ -241,15 +248,54 @@ class AddOnManager extends Service
 
     protected function callHook(AddOn $addOn, $hook)
     {
+        $hook = Str::trim((string)$hook);
         $primaryFile = $addOn->path . DIRECTORY_SEPARATOR . $addOn->primary_file;
-        if ((new File())->exists($primaryFile)) {
-            require_once($primaryFile);
+        $result = Arr::make([
+            'ok' => false,
+            'hook' => $hook,
+            'status' => 'pending',
+            'strategy' => null,
+            'callable' => null,
+            'attempted' => [],
+            'error' => null,
+        ]);
 
-            $hookFunction = "{$addOn->name}_{$hook}";
-            if (function_exists($hookFunction)) {
-                $hookFunction();
-            }
+        if (!(new File())->isReachable($primaryFile)) {
+            $result->set('status', 'missing_primary_file');
+            $result->set('error', 'Add-on primary file is not reachable.');
+
+            return $result->toArray();
         }
+
+        require_once($primaryFile);
+
+        $legacyHook = "{$addOn->name}_{$hook}";
+        $namespace = Str::trim((string)$addOn->namespace, '\\');
+        $candidates = Arr::make([]);
+        if (Val::isNotEmpty($namespace)) {
+            $candidates->push("{$namespace}\\{$legacyHook}");
+        }
+        $candidates->push($legacyHook)->unique()->values();
+        $result->set('attempted', $candidates->toArray());
+
+        foreach ($candidates as $candidate) {
+            if (!Func::isCallable($candidate)) {
+                continue;
+            }
+
+            Func::make($candidate)->call();
+            $result->set('ok', true);
+            $result->set('status', 'called');
+            $result->set('strategy', $candidate === $legacyHook ? 'legacy' : 'namespaced');
+            $result->set('callable', $candidate);
+
+            return $result->toArray();
+        }
+
+        $result->set('status', 'missing_callable');
+        $result->set('error', 'No compatible lifecycle hook callable was found.');
+
+        return $result->toArray();
     }
 
     public function uploadAddonFile($file, $destination)
@@ -537,6 +583,7 @@ class AddOnManager extends Service
             'error' => $ok ? null : 'Add-on registration could not be updated.',
             'messages' => $ok ? [] : ['Add-on registration could not be updated.'],
             'dependencies' => [],
+            'hooks' => [],
             'modelStatus' => $modelStatus,
             'query' => $query,
         ])->toArray();
