@@ -1,6 +1,7 @@
 <?php
 use App\Business\Managers\CommunicationManager;
 use BlueFission\Arr;
+use BlueFission\Data\FileSystem;
 use BlueFission\Flag;
 use BlueFission\Utils\Util;
 use BlueFission\Utils\File;
@@ -128,16 +129,28 @@ if (!function_exists('whisper')) {
 }
 
 if(!function_exists('resolve_path')) {
-	function resolve_path($pathInProject)
+	function resolve_path($pathInProject, ?string $applicationRoot = null, ?string $legacyProjectRoot = null)
 	{
-	    $rootPath = rtrim(APP_ROOT, DIRECTORY_SEPARATOR);
-	    $projectPath = rtrim(PROJECT_ROOT, DIRECTORY_SEPARATOR);
+	    $rootPath = rtrim($applicationRoot ?? APP_ROOT, DIRECTORY_SEPARATOR);
+	    $projectPath = rtrim($legacyProjectRoot ?? PROJECT_ROOT, DIRECTORY_SEPARATOR);
+	    $relativePath = Path::normalize((string)$pathInProject);
 
-	    $candidate = Path::normalize($rootPath . DIRECTORY_SEPARATOR . $pathInProject);
-	    $fallback = Path::normalize($projectPath . DIRECTORY_SEPARATOR . $pathInProject);
+	    $candidate = Path::normalize($rootPath . DIRECTORY_SEPARATOR . $relativePath);
+	    $fallback = Path::normalize($projectPath . DIRECTORY_SEPARATOR . $relativePath);
+	    $hasWildcard = Str::matchPattern($relativePath, '/[*?\[]/');
 
-	    if (file_exists($candidate)) {
+	    if (!$hasWildcard && (
+	        FileSystem::fileExists($candidate)
+	        || FileSystem::directoryExists($candidate)
+	    )) {
 	        return $candidate;
+	    }
+
+	    if ($hasWildcard) {
+	        $matches = glob($candidate);
+	        if (!Flag::isFalse($matches) && Arr::isNotEmpty($matches)) {
+	            return $candidate;
+	        }
 	    }
 
 	    return $fallback;
