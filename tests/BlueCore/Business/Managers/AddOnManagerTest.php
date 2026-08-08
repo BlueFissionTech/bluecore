@@ -161,9 +161,9 @@ class AddOnManagerTest extends TestCase
     public function testActivateAndActivateAllReturnStructuredStatuses(): void
     {
         $model = new FakeAddOnModel([
-            (object)['addon_id' => 1, 'is_active' => 0],
-            (object)['addon_id' => 2, 'is_active' => 1],
-        ]);
+            ['addon_id' => 1, 'is_active' => 0],
+            ['addon_id' => 2, 'is_active' => 1],
+        ], returnArrays: true);
         $manager = new TestableAddOnManager($model);
 
         $result = $manager->activate(5);
@@ -175,8 +175,31 @@ class AddOnManagerTest extends TestCase
 
         $all = $manager->activateAll();
 
-        $this->assertCount(1, $all);
-        $this->assertSame('1', $all[0]['addon']);
+        $this->assertTrue($all['ok']);
+        $this->assertSame('activate_all', $all['action']);
+        $this->assertSame(1, $all['total']);
+        $this->assertSame(1, $all['succeeded']);
+        $this->assertSame(0, $all['failed']);
+        $this->assertSame('1', $all['results'][0]['addon']);
+    }
+
+    public function testActivateAllPropagatesInnerFailuresAndMalformedRows(): void
+    {
+        $model = new FakeAddOnModel([
+            ['addon_id' => 3, 'is_active' => 0],
+            ['is_active' => 0],
+        ], returnArrays: true, failWritesForIds: [3]);
+        $manager = new TestableAddOnManager($model);
+
+        $result = $manager->activateAll();
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame(2, $result['total']);
+        $this->assertSame(0, $result['succeeded']);
+        $this->assertSame(2, $result['failed']);
+        $this->assertSame('registration', $result['results'][0]['stage']);
+        $this->assertSame('failed', $result['results'][1]['stage']);
+        $this->assertSame('Persisted add-on row is missing addon_id.', $result['results'][1]['error']);
     }
 
     public function testRepeatedInstallUsesSupportedModelOperationsAndDoesNotDuplicateRegistration(): void
@@ -324,8 +347,13 @@ class FakeAddOnModel
     public array $deletes = [];
     public array $records = [];
     private array $current = [];
+    private string $currentStatus = 'Success.';
 
-    public function __construct(array $addons = [])
+    public function __construct(
+        array $addons = [],
+        private bool $returnArrays = false,
+        private array $failWritesForIds = []
+    )
     {
         $this->records = array_map(static fn($addon) => (array)$addon, $addons);
     }
@@ -335,6 +363,14 @@ class FakeAddOnModel
         $record = (array)$values;
         $this->writes[] = $record;
         $id = $record['addon_id'] ?? count($this->records) + 1;
+        $this->currentStatus = in_array($id, $this->failWritesForIds, true)
+            ? 'Failed.'
+            : 'Success.';
+
+        if ($this->currentStatus !== 'Success.') {
+            return;
+        }
+
         $record['addon_id'] = $id;
 
         foreach ($this->records as $index => $existing) {
@@ -392,6 +428,10 @@ class FakeAddOnModel
 
     public function all(): array
     {
+        if ($this->returnArrays) {
+            return $this->records;
+        }
+
         return array_map(static fn($record) => (object)$record, $this->records);
     }
 
@@ -408,7 +448,7 @@ class FakeAddOnModel
 
     public function status(): string
     {
-        return 'Success.';
+        return $this->currentStatus;
     }
 
     public function query(): string
