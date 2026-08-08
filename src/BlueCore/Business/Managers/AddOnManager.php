@@ -6,6 +6,7 @@ use BlueFission\Arr;
 use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\Data\FileSystem;
 use BlueFission\Data\Storage\Storage;
+use BlueFission\Flag;
 use BlueFission\Services\Service;
 use BlueFission\Utils\Loader;
 use BlueFission\Utils\File;
@@ -84,9 +85,14 @@ class AddOnManager extends Service
         $addOns = $this->showAllAddOns();
         $results = [];
         foreach ($addOns as $addOn) {
-            $results[] = $this->install($addOn->name, $installDependencies);
+            try {
+                $results[] = $this->install($addOn->name, $installDependencies);
+            } catch (\Throwable $exception) {
+                $results[] = $this->failedLifecycleResult('install', (string)$addOn->name, $exception);
+            }
         }
-        return $results;
+
+        return $this->lifecycleBatchResult('install_all', $results);
     }
 
     public function uninstall($addOnId, bool $removeDependencies = false): array
@@ -150,11 +156,25 @@ class AddOnManager extends Service
         $addOns = $this->installedAddOns();
         $results = [];
         foreach ($addOns as $addOn) {
-            if (!$addOn->is_active) {
-                $results[] = $this->activate($addOn->addon_id);
+            $record = Arr::make($addOn);
+            if (Flag::parseBool($record->get('is_active'))) {
+                continue;
             }
+
+            $addOnId = $record->get('addon_id');
+            if (Val::isEmpty($addOnId)) {
+                $results[] = $this->failedLifecycleResult(
+                    'activate',
+                    '',
+                    new \UnexpectedValueException('Persisted add-on row is missing addon_id.')
+                );
+                continue;
+            }
+
+            $results[] = $this->activate($addOnId);
         }
-        return $results;
+
+        return $this->lifecycleBatchResult('activate_all', $results);
     }
 
     public function deactivate($addOnId): array
@@ -350,7 +370,10 @@ class AddOnManager extends Service
         $this->_model->clear();
         $this->_model->read();
 
-        return $this->_model->all();
+        return Arr::make(Arr::toArray($this->_model->all(), true))
+            ->map(fn ($addOn) => Arr::toArray($addOn, true))
+            ->values()
+            ->toArray();
     }
 
     protected function datasourceManager(): mixed
@@ -389,18 +412,57 @@ class AddOnManager extends Service
 
     private function lifecycleResult(string $action, string $addOn = '', mixed $modelStatus = null, string $query = ''): array
     {
+        $hasModelStatus = Val::isNotNull($modelStatus);
+        $ok = !$hasModelStatus || $modelStatus === Storage::STATUS_SUCCESS;
+
         return Arr::make([
-            'ok' => true,
+            'ok' => $ok,
             'action' => $action,
             'addon' => $addOn,
-            'changed' => false,
-            'stage' => 'pending',
-            'nextAction' => null,
-            'error' => null,
-            'messages' => [],
+            'changed' => $hasModelStatus && $ok,
+            'stage' => $hasModelStatus ? ($ok ? 'complete' : 'registration') : 'pending',
+            'nextAction' => $ok ? null : "retry_{$action}",
+            'error' => $ok ? null : 'Add-on registration could not be updated.',
+            'messages' => $ok ? [] : ['Add-on registration could not be updated.'],
             'dependencies' => [],
             'modelStatus' => $modelStatus,
             'query' => $query,
+        ])->toArray();
+    }
+
+    private function failedLifecycleResult(string $action, string $addOn, \Throwable $exception): array
+    {
+        $result = $this->lifecycleResult($action, $addOn);
+        $result['ok'] = false;
+        $result['stage'] = 'failed';
+        $result['nextAction'] = "retry_{$action}";
+        $result['error'] = $exception->getMessage();
+        $result['messages'][] = $exception->getMessage();
+
+        return $result;
+    }
+
+    private function lifecycleBatchResult(string $action, array $results): array
+    {
+        $failures = Arr::make($results)
+            ->filter(fn ($result) => Flag::isFalse(Arr::getPath($result, 'ok', false)))
+            ->values()
+            ->toArray();
+        $changes = Arr::make($results)
+            ->filter(fn ($result) => Flag::parseBool(Arr::getPath($result, 'changed', false)))
+            ->values()
+            ->toArray();
+        $total = Arr::size($results);
+        $failed = Arr::size($failures);
+
+        return Arr::make([
+            'ok' => $failed === 0,
+            'action' => $action,
+            'changed' => Arr::isNotEmpty($changes),
+            'total' => $total,
+            'succeeded' => $total - $failed,
+            'failed' => $failed,
+            'results' => $results,
         ])->toArray();
     }
 
