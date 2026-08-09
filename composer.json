@@ -1,9 +1,19 @@
 {
     "name": "bluefission/bluecore",
-    "description": "Blue Fission Opus Framework Core",
+    "description": "Modular, event-driven application framework built on DevElation",
+    "homepage": "https://github.com/BlueFissionTech/bluecore",
     "license": "MIT",
     "type": "composer-plugin",
-    "keywords": ["framework", "core", "bluefission", "opus"],
+    "keywords": [
+        "bluecore",
+        "bluefission",
+        "materia",
+        "php",
+        "framework",
+        "event-driven",
+        "plugins",
+        "code-generation"
+    ],
     "authors": [
         {
             "name": "Devon Scott",
@@ -16,7 +26,7 @@
     "prefer-stable": true,
     "require": {
         "php": ">=8.2",
-        "bluefission/develation": "^1.3.39",
+        "bluefission/develation": "^1.3.41",
         "composer/installers": "^1.11",
         "composer-plugin-api": "^2.0",
         "vlucas/phpdotenv": "^5.5",
@@ -58,9 +68,41 @@
         "class": "BlueFission\\BlueCore\\Installers\\PluginInstaller"
     },
     "config": {
+        "platform-check": true,
         "allow-plugins": {
             "composer/installers": true,
             "php-http/discovery": true
+        },
+        "audit": {
+            "abandoned": "report"
         }
+    },
+    "archive": {
+        "exclude": [
+            "/.agents",
+            "/.codex",
+            "/.github",
+            "/.phpunit.cache",
+            "/.phpunit.result.cache",
+            "/AGENTS.behavior.md",
+            "/AGENTS.md",
+            "/AGENTS.standards.md",
+            "/SPEC.md",
+            "/artifacts",
+            "/composer.lock",
+            "/docs",
+            "/examples",
+            "/harness.json",
+            "/phpunit.xml",
+            "/phpunit.xml.dist",
+            "/scripts",
+            "/tests",
+            "/tests.md",
+            "/vendor"
+        ]
+    },
+    "support": {
+        "issues": "https://github.com/BlueFissionTech/bluecore/issues",
+        "source": "https://github.com/BlueFissionTech/bluecore"
     }
 }
