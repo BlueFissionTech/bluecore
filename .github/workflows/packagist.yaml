@@ -1,0 +1,73 @@
+name: Packagist
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-*'
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packagist-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update Packagist metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Update package
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
+          PACKAGIST_PACKAGE_URL: https://packagist.org/packages/bluefission/bluecore
+          PACKAGIST_REPOSITORY: https://github.com/BlueFissionTech/bluecore
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PACKAGIST_USERNAME}" ] || [ -z "${PACKAGIST_TOKEN}" ]; then
+            echo "::error::PACKAGIST_USERNAME and PACKAGIST_TOKEN Actions secrets are required to update Packagist."
+            exit 1
+          fi
+
+          update_packagist() {
+            local repository="$1"
+            local response_file
+            local http_code
+
+            response_file="$(mktemp)"
+
+            http_code="$(curl --show-error --silent \
+              --output "${response_file}" \
+              --write-out "%{http_code}" \
+              --request POST \
+              --user-agent "BlueFissionTech/bluecore Packagist workflow" \
+              --header "Content-Type: application/json" \
+              --data "{\"repository\":{\"url\":\"${repository}\"}}" \
+              "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_TOKEN}")"
+
+            if [ "${http_code}" -ge 200 ] && [ "${http_code}" -lt 300 ]; then
+              cat "${response_file}"
+              rm -f "${response_file}"
+              return 0
+            fi
+
+            echo "::warning::Packagist update request for ${repository} returned HTTP ${http_code}."
+            cat "${response_file}"
+            rm -f "${response_file}"
+            return 1
+          }
+
+          if ! update_packagist "${PACKAGIST_PACKAGE_URL}"; then
+            echo "Retrying Packagist update using the repository URL."
+            update_packagist "${PACKAGIST_REPOSITORY}"
+          fi
