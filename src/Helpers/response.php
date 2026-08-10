@@ -6,6 +6,7 @@ use BlueFission\HTML\Template;
 use BlueFission\Services\Response;
 use BlueFission\Net\HTTP;
 use BlueFission\Arr;
+use BlueFission\Func;
 use BlueFission\Str;
 use BlueFission\Val;
 use BlueFission\Utils\File;
@@ -14,40 +15,69 @@ use BlueFission\Utils\Path;
 /**
  * Define the template function.
  *
+ * @param string $themeName Name of the registered theme
  * @param string $file Name of the file to load
  * @param array $data Data to be passed to the template
  * @return string The rendered template
  */
 if (!function_exists( 'template' )) {
 	function template(string $themeName, string $file, array $data = []) {
+		static $delegating = false;
+
+		if (Val::isFalsy($delegating)) {
+			$renderer = template_renderer_service();
+			if (Val::isNotNull($renderer) && Func::isCallable([$renderer, 'render'])) {
+				$delegating = true;
+				try {
+					return $renderer->render($themeName, $file, $data);
+				} finally {
+					$delegating = false;
+				}
+			}
+		}
+
+		return template_legacy_render($themeName, $file, $data);
+	}
+}
+
+if (!function_exists('template_renderer_service')) {
+	function template_renderer_service(): mixed
+	{
+		try {
+			return instance('template');
+		} catch (\Exception $exception) {
+			$missingService = Str::make($exception->getMessage())
+				->match('The service template is not registered');
+
+			if (Val::isFalsy($missingService)) {
+				throw $exception;
+			}
+
+			return null;
+		}
+	}
+}
+
+if (!function_exists('template_legacy_render')) {
+	function template_legacy_render(string $themeName, string $file, array $data = []): string
+	{
 		$app = instance();
 		$theme = $app->theme($themeName);
-		if (!$theme) {
+		if (Val::isEmpty($theme)) {
 			throw new \Exception("Theme '$themeName' not found.");
 		}
 
-		// $path = dirname(getcwd()).DIRECTORY_SEPARATOR.'resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR.$file;
-		// $module_path = dirname(getcwd()).DIRECTORY_SEPARATOR.'resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR.'modules';
 		store('asset_dir', $theme->location);
-		$path = $theme->location.$file;
-		$module_path = $theme->location.'modules';
+		$path = Path::normalize($theme->location . DIRECTORY_SEPARATOR . $file);
+		$modulePath = Path::normalize($theme->location . DIRECTORY_SEPARATOR . 'modules');
 
 		$template = new Template();
-		
-		// Configure the directory for template modules
-		$template->config('module_directory', $module_path);
-
-		// Load the template file
+		$template->config('template_directory', Path::normalize($theme->location));
+		$template->config('module_directory', $modulePath);
 		$template->load($path);
-
-		// Pass the data to the template
 		$template->field($data);
 
-		// Render the template
-		$output = $template->render();
-
-		// $template->cache();
-		return $output;
+		return $template->render();
 	}
 }
 
