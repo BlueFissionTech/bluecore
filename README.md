@@ -53,6 +53,18 @@ The `ValueObject` class is used to store and manage values as an object, providi
 
 The `Theme` class manages theme-related properties and paths, allowing for easy customization of the application's look and feel.
 
+Applications may register a rendering service under the canonical `template` service name. The service must expose `render(string $themeName, string $file, array $data): string`; the global helper preserves the same arguments and returns its result directly.
+
+```php
+$app->delegate('template', $renderer);
+
+$output = template('admin', 'dashboard.vibe', [
+    'title' => 'Dashboard',
+]);
+```
+
+When no compatible service is registered, `template()` renders the selected theme with DevElation's `HTML\Template` and `Parsing\Parser` pipeline. The fallback configures the theme directory for template includes and its `modules` directory for module includes.
+
 ### MenuItem and Menu
 
 The `MenuItem` and `Menu` classes represent individual items and collections of items in a menu, respectively. These classes facilitate the creation and rendering of dynamic menu structures.
