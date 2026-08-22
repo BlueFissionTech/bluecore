@@ -28,3 +28,6 @@ jobs:
 
       - name: Run CI checks
         run: composer ci
+
+      - name: Verify project installer source and dist parity
+        run: php tests/Integration/project-installer-parity.php

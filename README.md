@@ -25,6 +25,12 @@ composer require bluefission/bluecore:^0.1.0-alpha
 
 The alpha line is intended for integration testing while the public API is finalized. Pin an explicit alpha constraint in reproducible environments.
 
+### Project Packages
+
+Composer packages with the `opus-project` type install into `core/` by default. Project directories and root configuration files are promoted as non-destructive overrides: existing root files are preserved, while files introduced by later project versions are added during updates. Source and distribution installs follow the same lifecycle.
+
+Set `OPUS_STANDALONE=1` to install a project package under `vendor/` without promoting root overrides.
+
 ## Usage
 
 ### Event Management
