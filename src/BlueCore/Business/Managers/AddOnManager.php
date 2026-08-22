@@ -226,30 +226,34 @@ class AddOnManager extends Service
     public function loadActivatedAddOns()
     {
         $addOns = $this->_model->getActivatedAddOns();
-        
+        $results = Arr::make([]);
+
         foreach ($addOns as $addOn) {
             $object = new AddOn;
             $object->assign($addOn);
-            // $object->path = resolve_path('addons' . DIRECTORY_SEPARATOR . $addOn);
-            // $object->primary_file = 'main.php';
-            $addOn = $object;
-            $this->loadAddOn($addOn);
+            $results->push($this->loadAddOn($object));
         }
+
+        return $results->toArray();
     }
 
-    protected function loadAddOn(AddOn $addOn)
+    protected function loadAddOn(AddOn $addOn): array
     {
-        $primaryFile = $addOn->path . DIRECTORY_SEPARATOR . $addOn->primary_file;
-        // $primaryFile = resolve_path('addons' . DIRECTORY_SEPARATOR . $addon . DIRECTORY_SEPARATOR . 'main.php');
-        if ($primaryFile != DIRECTORY_SEPARATOR && (new File())->exists($primaryFile)) {
-            require_once($primaryFile);
+        $resolution = $this->resolvePrimaryFile($addOn);
+        if (Flag::isFalse($resolution['ok'])) {
+            return $resolution;
         }
+
+        $resolution['value'] = require_once($resolution['path']);
+        $resolution['status'] = 'loaded';
+
+        return $resolution;
     }
 
     protected function callHook(AddOn $addOn, $hook)
     {
         $hook = Str::trim((string)$hook);
-        $primaryFile = $addOn->path . DIRECTORY_SEPARATOR . $addOn->primary_file;
+        $resolution = $this->resolvePrimaryFile($addOn);
         $result = Arr::make([
             'ok' => false,
             'hook' => $hook,
@@ -257,17 +261,19 @@ class AddOnManager extends Service
             'strategy' => null,
             'callable' => null,
             'attempted' => [],
+            'primaryFile' => $resolution['path'],
+            'primaryFileResolution' => $resolution,
             'error' => null,
         ]);
 
-        if (!(new File())->isReachable($primaryFile)) {
-            $result->set('status', 'missing_primary_file');
-            $result->set('error', 'Add-on primary file is not reachable.');
+        if (Flag::isFalse($resolution['ok'])) {
+            $result->set('status', $resolution['status']);
+            $result->set('error', $resolution['error']);
 
             return $result->toArray();
         }
 
-        require_once($primaryFile);
+        require_once($resolution['path']);
 
         $legacyHook = "{$addOn->name}_{$hook}";
         $namespace = Str::trim((string)$addOn->namespace, '\\');
@@ -296,6 +302,97 @@ class AddOnManager extends Service
         $result->set('error', 'No compatible lifecycle hook callable was found.');
 
         return $result->toArray();
+    }
+
+    protected function resolvePrimaryFile(AddOn $addOn): array
+    {
+        $result = Arr::make([
+            'ok' => false,
+            'status' => 'pending',
+            'strategy' => null,
+            'path' => null,
+            'configured' => null,
+            'fallback' => null,
+            'attempted' => [],
+            'error' => null,
+        ]);
+
+        try {
+            $name = $this->normalizeAddOnIdentifier($addOn->name, 'name');
+            $primaryFile = Val::isEmpty($addOn->primary_file)
+                ? 'main.php'
+                : $this->normalizeDefinitionPath($addOn->primary_file, 'primary_file');
+        } catch (\InvalidArgumentException $exception) {
+            $result->set('status', 'unsafe_primary_file');
+            $result->set('error', $exception->getMessage());
+
+            return $result->toArray();
+        }
+
+        $addOnRoot = Path::normalize(resolve_path('addons' . DIRECTORY_SEPARATOR . $name));
+        $configuredRoot = Path::normalize((string)$addOn->path);
+        $configured = Val::isEmpty($configuredRoot)
+            ? null
+            : Path::normalize($configuredRoot . DIRECTORY_SEPARATOR . $primaryFile);
+        $fallback = Path::normalize($addOnRoot . DIRECTORY_SEPARATOR . $primaryFile);
+        $candidates = Arr::make([]);
+        if (Val::isNotEmpty($configured)) {
+            $candidates->push(['strategy' => 'configured', 'path' => $configured]);
+        }
+        if (Val::isEmpty($configured) || !Str::match($configured, $fallback)) {
+            $candidates->push(['strategy' => 'fallback', 'path' => $fallback]);
+        }
+
+        $result->set('configured', $configured);
+        $result->set('fallback', $fallback);
+        $result->set('attempted', $candidates->map(fn ($candidate) => $candidate['path'])->toArray());
+
+        foreach ($candidates as $candidate) {
+            if (!(new File())->isReachable($candidate['path'])) {
+                continue;
+            }
+
+            if (!$this->primaryFileIsContained($candidate['path'], $addOnRoot)) {
+                $result->set('status', 'unsafe_primary_file');
+                $result->set('error', 'Add-on primary file escapes its configured add-on root.');
+
+                return $result->toArray();
+            }
+
+            $result->set('ok', true);
+            $result->set('status', 'resolved');
+            $result->set('strategy', $candidate['strategy']);
+            $result->set('path', Path::normalize(realpath($candidate['path'])));
+
+            return $result->toArray();
+        }
+
+        $result->set('status', 'missing_primary_file');
+        $result->set('error', 'Add-on primary file is not reachable from configured or canonical paths.');
+
+        return $result->toArray();
+    }
+
+    private function primaryFileIsContained(string $primaryFile, string $addOnRoot): bool
+    {
+        $resolvedFile = realpath($primaryFile);
+        $resolvedRoot = realpath($addOnRoot);
+        if (Val::isEmpty($resolvedFile) || Val::isEmpty($resolvedRoot)) {
+            return false;
+        }
+
+        $resolvedFile = Path::normalize($resolvedFile);
+        $resolvedRoot = Path::normalize($resolvedRoot);
+        if (Str::match(DIRECTORY_SEPARATOR, '\\')) {
+            $resolvedFile = Str::lower($resolvedFile);
+            $resolvedRoot = Str::lower($resolvedRoot);
+        }
+
+        $rootPrefix = Str::endsWith($resolvedRoot, DIRECTORY_SEPARATOR)
+            ? $resolvedRoot
+            : $resolvedRoot . DIRECTORY_SEPARATOR;
+
+        return Str::startsWith($resolvedFile, $rootPrefix);
     }
 
     public function uploadAddonFile($file, $destination)

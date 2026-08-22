@@ -162,7 +162,7 @@ class AddOnManagerTest extends TestCase
     public function testNamespacedHookResolutionAndLegacyFallbackReturnDiagnostics(): void
     {
         $manager = new TestableAddOnManager(new FakeAddOnModel());
-        $namespacedPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'namespaced';
+        $namespacedPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'demo';
         File::ensureFile(
             $namespacedPath . DIRECTORY_SEPARATOR . 'main.php',
             "<?php\nnamespace BlueFission\\Tests\\Fixtures\\AddOnHooks;\nfunction demo_install() { \$GLOBALS['bluecore_hook_calls'][] = 'namespaced'; }",
@@ -185,7 +185,7 @@ class AddOnManagerTest extends TestCase
             $namespacedResult['callable']
         );
 
-        $legacyPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'legacy';
+        $legacyPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'legacydemo';
         File::ensureFile(
             $legacyPath . DIRECTORY_SEPARATOR . 'main.php',
             "<?php\nfunction legacydemo_install() { \$GLOBALS['bluecore_hook_calls'][] = 'legacy'; }",
@@ -210,7 +210,7 @@ class AddOnManagerTest extends TestCase
     public function testMissingHookReturnsStructuredDiagnostics(): void
     {
         $manager = new TestableAddOnManager(new FakeAddOnModel());
-        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'missing-hook';
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'missing';
         File::ensureFile($path . DIRECTORY_SEPARATOR . 'main.php', '<?php', true);
         $addOn = new AddOn();
         $addOn->assign([
@@ -229,6 +229,154 @@ class AddOnManagerTest extends TestCase
             $result['attempted']
         );
         $this->assertNotEmpty($result['error']);
+    }
+
+    public function testPrimaryFilePrefersReachableConfiguredCandidate(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+        $addOnRoot = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'configured';
+        $configuredRoot = $addOnRoot . DIRECTORY_SEPARATOR . 'current';
+        File::ensureFile($configuredRoot . DIRECTORY_SEPARATOR . 'main.php', '<?php', true);
+        File::ensureFile($addOnRoot . DIRECTORY_SEPARATOR . 'main.php', '<?php', true);
+        $addOn = new AddOn();
+        $addOn->assign([
+            'name' => 'configured',
+            'path' => $configuredRoot,
+            'primary_file' => 'main.php',
+        ]);
+
+        $resolution = $manager->primaryFile($addOn);
+
+        $this->assertTrue($resolution['ok']);
+        $this->assertSame('configured', $resolution['strategy']);
+        $this->assertSame(Path::normalize($configuredRoot . DIRECTORY_SEPARATOR . 'main.php'), $resolution['path']);
+    }
+
+    public function testPrimaryFileFallsBackFromStalePersistedRoot(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+        $fallback = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'portable' . DIRECTORY_SEPARATOR . 'main.php';
+        File::ensureFile($fallback, '<?php', true);
+        $addOn = new AddOn();
+        $addOn->assign([
+            'name' => 'portable',
+            'path' => self::$root . DIRECTORY_SEPARATOR . 'retired-root' . DIRECTORY_SEPARATOR . 'portable',
+            'primary_file' => 'main.php',
+        ]);
+
+        $resolution = $manager->primaryFile($addOn);
+
+        $this->assertTrue($resolution['ok']);
+        $this->assertSame('fallback', $resolution['strategy']);
+        $this->assertSame(Path::normalize($fallback), $resolution['path']);
+        $this->assertCount(2, $resolution['attempted']);
+    }
+
+    public function testPrimaryFileUsesCanonicalDefaultForLegacyRecord(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+        $fallback = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'legacyrecord' . DIRECTORY_SEPARATOR . 'main.php';
+        File::ensureFile($fallback, '<?php', true);
+        $addOn = new AddOn();
+        $addOn->assign([
+            'name' => 'legacyrecord',
+            'path' => '',
+            'primary_file' => '',
+        ]);
+
+        $resolution = $manager->primaryFile($addOn);
+
+        $this->assertTrue($resolution['ok']);
+        $this->assertSame('fallback', $resolution['strategy']);
+        $this->assertNull($resolution['configured']);
+        $this->assertSame(Path::normalize($fallback), $resolution['path']);
+    }
+
+    public function testPrimaryFileRejectsReachablePathOutsideAddOnRoot(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+        $outside = self::$root . DIRECTORY_SEPARATOR . 'outside' . DIRECTORY_SEPARATOR . 'main.php';
+        File::ensureFile($outside, '<?php', true);
+        File::ensureFile(
+            self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'contained' . DIRECTORY_SEPARATOR . 'main.php',
+            '<?php',
+            true
+        );
+        $addOn = new AddOn();
+        $addOn->assign([
+            'name' => 'contained',
+            'path' => dirname($outside),
+            'primary_file' => 'main.php',
+        ]);
+
+        $resolution = $manager->primaryFile($addOn);
+
+        $this->assertFalse($resolution['ok']);
+        $this->assertSame('unsafe_primary_file', $resolution['status']);
+        $this->assertNull($resolution['path']);
+        $this->assertNotEmpty($resolution['error']);
+    }
+
+    public function testPrimaryFileRejectsTraversalAndReportsMissingCandidates(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+        Path::ensureDir(self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'unsafe');
+        $unsafe = new AddOn();
+        $unsafe->assign([
+            'name' => 'unsafe',
+            'path' => self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'unsafe',
+            'primary_file' => '../main.php',
+        ]);
+
+        $unsafeResolution = $manager->primaryFile($unsafe);
+
+        $this->assertFalse($unsafeResolution['ok']);
+        $this->assertSame('unsafe_primary_file', $unsafeResolution['status']);
+
+        $missing = new AddOn();
+        $missing->assign([
+            'name' => 'missing-primary',
+            'path' => self::$root . DIRECTORY_SEPARATOR . 'retired-root' . DIRECTORY_SEPARATOR . 'missing-primary',
+            'primary_file' => 'main.php',
+        ]);
+        Path::ensureDir(self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'missing-primary');
+
+        $missingResolution = $manager->primaryFile($missing);
+
+        $this->assertFalse($missingResolution['ok']);
+        $this->assertSame('missing_primary_file', $missingResolution['status']);
+        $this->assertCount(2, $missingResolution['attempted']);
+        $this->assertSame([
+            $missingResolution['configured'],
+            $missingResolution['fallback'],
+        ], $missingResolution['attempted']);
+    }
+
+    public function testHookAndLoaderSharePortablePrimaryFileResolution(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+        $fallback = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'sharedresolver' . DIRECTORY_SEPARATOR . 'main.php';
+        File::ensureFile(
+            $fallback,
+            "<?php\n\$GLOBALS['bluecore_primary_loads'][] = 'loaded';\nfunction sharedresolver_install() { \$GLOBALS['bluecore_hook_calls'][] = 'portable'; }",
+            true
+        );
+        $addOn = new AddOn();
+        $addOn->assign([
+            'name' => 'sharedresolver',
+            'path' => self::$root . DIRECTORY_SEPARATOR . 'retired-root' . DIRECTORY_SEPARATOR . 'sharedresolver',
+            'primary_file' => 'main.php',
+        ]);
+
+        $load = $manager->load($addOn);
+        $hook = $manager->hook($addOn, 'install');
+
+        $this->assertTrue($load['ok']);
+        $this->assertSame('fallback', $load['strategy']);
+        $this->assertTrue($hook['ok']);
+        $this->assertSame(Path::normalize($fallback), $hook['primaryFile']);
+        $this->assertSame(['loaded'], $GLOBALS['bluecore_primary_loads']);
+        $this->assertContains('portable', $GLOBALS['bluecore_hook_calls']);
     }
 
     public function testActivateAndActivateAllReturnStructuredStatuses(): void
@@ -407,6 +555,16 @@ class TestableAddOnManager extends AddOnManager
     public function hook(AddOn $addOn, string $hook): array
     {
         return $this->callHook($addOn, $hook);
+    }
+
+    public function primaryFile(AddOn $addOn): array
+    {
+        return $this->resolvePrimaryFile($addOn);
+    }
+
+    public function load(AddOn $addOn): array
+    {
+        return $this->loadAddOn($addOn);
     }
 
     protected function datasourceManager(): mixed
