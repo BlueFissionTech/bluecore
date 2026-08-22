@@ -1,184 +1,176 @@
 <?php
 
+use BlueFission\Arr;
+use BlueFission\Flag;
+use BlueFission\Net\HTTP;
+use BlueFission\Num;
+use BlueFission\Str;
+use BlueFission\Utils\File;
+
+if (!function_exists('blueCoreDebugMode')) {
+    function blueCoreDebugMode(): bool
+    {
+        return Flag::parseBool(env('DEBUG_MODE'), false);
+    }
+}
+
+if (!function_exists('blueCoreSetErrorStatus')) {
+    function blueCoreSetErrorStatus(): void
+    {
+        if (Str::match(PHP_SAPI, 'cli') || headers_sent()) {
+            return;
+        }
+
+        $status = HTTP::statusLine(500);
+        if (Str::isNotEmpty($status)) {
+            header($status);
+        }
+    }
+}
+
 if (!function_exists('customErrorHandler')) {
-    function customErrorHandler($errno, $errstr, $errfile, $errline) {
-        // Prevent default error handler
+    function customErrorHandler($errno, $errstr, $errfile, $errline): bool
+    {
         if (!(error_reporting() & $errno)) {
             return false;
         }
 
-        // Check if running in CLI mode
-        $isCli = php_sapi_name() === 'cli';
+        error_log("Error: [{$errno}] {$errstr} in {$errfile} on line {$errline}");
 
-        // Determine the background and border color based on the error type
-        switch ($errno) {
-            case E_WARNING:
-            case E_NOTICE:
-                $backgroundColor = '#cce5ff';
-                $borderColor = '#b8daff';
-                break;
-            case E_ERROR:
-            case E_USER_ERROR:
-            case E_RECOVERABLE_ERROR:
-                $backgroundColor = '#fff3cd';
-                $borderColor = '#ffeeba';
-                break;
-            default:
-                $backgroundColor = '#f8d7da';
-                $borderColor = '#f5c6cb';
+        if (!blueCoreDebugMode()) {
+            return true;
         }
 
-        // Customize the error display based on DEBUG_MODE and CLI
-        if (env('DEBUG_MODE') === 'true') {
-            if ($isCli) {
-                // CLI output
-                echo "Error [$errno]: $errstr in $errfile on line $errline\n";
-                sourceCodeWindow($errfile, $errline);
-            } else {
-                // HTML output
-                echo "<div style='background-color: $backgroundColor; color: #721c24; border: 1px solid $borderColor; padding: 20px; font-family: Arial, sans-serif;'>";
-                echo "<h2 style='color: #721c24;'>An error occurred!</h2>";
-                echo "<p><strong>Error Code:</strong> $errno</p>";
-                echo "<p><strong>Message:</strong> $errstr</p>";
-                echo "<p><strong>File:</strong> $errfile</p>";
-                echo "<p><strong>Line:</strong> $errline</p>";
-                sourceCodeWindow($errfile, $errline);
-                echo "<hr>";
-                echo "<p>Please contact support or try again later.</p>";
-                echo "</div>";
-            }
-        } else {
-            if ($isCli) {
-                // CLI output without sensitive information
-                echo "Error [$errno]: An error occurred. Please contact your administrator.\n";
-            } else {
-                // HTML output without sensitive information
-                echo "<div style='background-color: $backgroundColor; color: #721c24; border: 1px solid $borderColor; padding: 20px; font-family: Arial, sans-serif;'>";
-                echo "<h2 style='color: #721c24;'>An error occurred!</h2>";
-                echo "<p>Please contact your administrator.</p>";
-                echo "</div>";
-            }
+        if (Str::match(PHP_SAPI, 'cli')) {
+            echo "Error [{$errno}]: {$errstr} in {$errfile} on line {$errline}\n";
+            sourceCodeWindow($errfile, $errline);
+
+            return true;
         }
 
-        // Log the error to a file
-        error_log("Error: [$errno] $errstr in $errfile on line $errline");
+        echo "<div style='background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 20px; font-family: Arial, sans-serif;'>";
+        echo '<h2>An error occurred!</h2>';
+        echo '<p><strong>Error Code:</strong> ' . htmlspecialchars((string)$errno) . '</p>';
+        echo '<p><strong>Message:</strong> ' . htmlspecialchars((string)$errstr) . '</p>';
+        echo '<p><strong>File:</strong> ' . htmlspecialchars((string)$errfile) . '</p>';
+        echo '<p><strong>Line:</strong> ' . htmlspecialchars((string)$errline) . '</p>';
+        sourceCodeWindow($errfile, $errline);
+        echo '</div>';
 
-        /* Don't execute PHP internal error handler */
         return true;
     }
 
-    // Set custom error handler
-    set_error_handler("customErrorHandler");
+    set_error_handler('customErrorHandler');
 }
 
 if (!function_exists('customExceptionHandler')) {
-    function customExceptionHandler($exception) {
-        $isCli = php_sapi_name() === 'cli';
-        $backgroundColor = '#fff3cd';
-        $borderColor = '#ffeeba';
+    function customExceptionHandler(Throwable $exception): void
+    {
+        error_log(
+            'Exception: ' . $exception->getMessage()
+            . ' in ' . $exception->getFile()
+            . ' on line ' . $exception->getLine()
+        );
+        blueCoreSetErrorStatus();
 
-        if (env('DEBUG_MODE') === 'true') {
-            if ($isCli) {
-                // CLI output
-                echo "Exception: " . $exception->getMessage() . " in " . $exception->getFile() . " on line " . $exception->getLine() . "\n";
+        if (blueCoreDebugMode()) {
+            if (Str::match(PHP_SAPI, 'cli')) {
+                echo 'Exception: ' . $exception->getMessage()
+                    . ' in ' . $exception->getFile()
+                    . ' on line ' . $exception->getLine() . "\n";
                 sourceCodeWindow($exception->getFile(), $exception->getLine());
             } else {
-                // HTML output
-                echo "<div style='background-color: $backgroundColor; color: #721c24; border: 1px solid $borderColor; padding: 20px; font-family: Arial, sans-serif;'>";
-                echo "<h2 style='color: #721c24;'>An exception occurred!</h2>";
-                echo "<p><strong>Message:</strong> " . $exception->getMessage() . "</p>";
-                echo "<p><strong>File:</strong> " . $exception->getFile() . "</p>";
-                echo "<p><strong>Line:</strong> " . $exception->getLine() . "</p>";
+                echo "<div style='background-color: #fff3cd; color: #721c24; border: 1px solid #ffeeba; padding: 20px; font-family: Arial, sans-serif;'>";
+                echo '<h2>An exception occurred!</h2>';
+                echo '<p><strong>Message:</strong> ' . htmlspecialchars($exception->getMessage()) . '</p>';
+                echo '<p><strong>File:</strong> ' . htmlspecialchars($exception->getFile()) . '</p>';
+                echo '<p><strong>Line:</strong> ' . htmlspecialchars((string)$exception->getLine()) . '</p>';
                 sourceCodeWindow($exception->getFile(), $exception->getLine());
-                echo "<hr>";
-                echo "<p>Please contact support or try again later.</p>";
-                echo "</div>";
-            }
-        } else {
-            if ($isCli) {
-                // CLI output without sensitive information
-                echo "Exception: An error occurred. Please contact your administrator.\n";
-            } else {
-                // HTML output without sensitive information
-                echo "<div style='background-color: $backgroundColor; color: #721c24; border: 1px solid $borderColor; padding: 20px; font-family: Arial, sans-serif;'>";
-                echo "<h2 style='color: #721c24;'>An exception occurred!</h2>";
-                echo "<p>Please contact your administrator.</p>";
-                echo "</div>";
+                echo '</div>';
             }
         }
 
-        // Log the exception to a file
-        error_log("Exception: " . $exception->getMessage() . " in " . $exception->getFile() . " on line " . $exception->getLine());
+        if (Str::match(PHP_SAPI, 'cli')) {
+            exit(1);
+        }
     }
 
-    // Set custom exception handler
-    set_exception_handler("customExceptionHandler");
+    set_exception_handler('customExceptionHandler');
 }
 
 if (!function_exists('shutdownHandler')) {
-    function shutdownHandler() {
+    function shutdownHandler(): void
+    {
         $error = error_get_last();
-        if ($error !== NULL) {
-            $isCli = php_sapi_name() === 'cli';
-            $backgroundColor = '#f8d7da';
-            $borderColor = '#f5c6cb';
+        $fatalTypes = Arr::make([E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR]);
 
-            if (env('DEBUG_MODE') === 'true') {
-                if ($isCli) {
-                    // CLI output
-                    echo "Fatal Error: " . $error['message'] . " in " . $error['file'] . " on line " . $error['line'] . "\n";
-                    sourceCodeWindow($error['file'], $error['line']);
-                } else {
-                    // HTML output
-                    echo "<div style='background-color: $backgroundColor; color: #721c24; border: 1px solid $borderColor; padding: 20px; font-family: Arial, sans-serif;'>";
-                    echo "<h2 style='color: #721c24;'>A fatal error occurred!</h2>";
-                    echo "<p><strong>Error Type:</strong> " . $error['type'] . "</p>";
-                    echo "<p><strong>Message:</strong> " . $error['message'] . "</p>";
-                    echo "<p><strong>File:</strong> " . $error['file'] . "</p>";
-                    echo "<p><strong>Line:</strong> " . $error['line'] . "</p>";
-                    sourceCodeWindow($error['file'], $error['line']);
-                    echo "<hr>";
-                    echo "<p>Please contact support or try again later.</p>";
-                    echo "</div>";
-                }
-            } else {
-                if ($isCli) {
-                    // CLI output without sensitive information
-                    echo "Fatal Error: An error occurred. Please contact your administrator.\n";
-                } else {
-                    // HTML output without sensitive information
-                    echo "<div style='background-color: $backgroundColor; color: #721c24; border: 1px solid $borderColor; padding: 20px; font-family: Arial, sans-serif;'>";
-                    echo "<h2 style='color: #721c24;'>A fatal error occurred!</h2>";
-                    echo "<p>Please contact your administrator.</p>";
-                    echo "</div>";
-                }
-            }
-
-            // Log the fatal error
-            error_log("Fatal Error: [" . $error['type'] . "] " . $error['message'] . " in " . $error['file'] . " on line " . $error['line']);
+        if (!Arr::is($error) || !$fatalTypes->has($error['type'] ?? null, true)) {
+            return;
         }
+
+        error_log(
+            'Fatal Error: [' . $error['type'] . '] ' . $error['message']
+            . ' in ' . $error['file']
+            . ' on line ' . $error['line']
+        );
+        blueCoreSetErrorStatus();
+
+        if (!blueCoreDebugMode()) {
+            return;
+        }
+
+        if (Str::match(PHP_SAPI, 'cli')) {
+            echo 'Fatal Error: ' . $error['message']
+                . ' in ' . $error['file']
+                . ' on line ' . $error['line'] . "\n";
+            sourceCodeWindow($error['file'], $error['line']);
+
+            return;
+        }
+
+        echo "<div style='background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 20px; font-family: Arial, sans-serif;'>";
+        echo '<h2>A fatal error occurred!</h2>';
+        echo '<p><strong>Message:</strong> ' . htmlspecialchars((string)$error['message']) . '</p>';
+        echo '<p><strong>File:</strong> ' . htmlspecialchars((string)$error['file']) . '</p>';
+        echo '<p><strong>Line:</strong> ' . htmlspecialchars((string)$error['line']) . '</p>';
+        sourceCodeWindow($error['file'], $error['line']);
+        echo '</div>';
     }
 
-    // Register shutdown function for fatal errors
     register_shutdown_function('shutdownHandler');
 }
 
 if (!function_exists('sourceCodeWindow')) {
-    function sourceCodeWindow($file, $line) {
-        $lines = file($file);
-        $start = $line - 5;
-        $end = $line + 5;
-        $start = $start < 0 ? 0 : $start;
-        $end = $end >= count($lines) ? count($lines) - 1 : $end;
+    function sourceCodeWindow($file, $line): void
+    {
+        if (!(new File())->isReachable($file)) {
+            return;
+        }
 
-        echo "<pre>";
-        for ($i = $start; $i <= $end; $i++) {
-            if ($i === $line - 1) {
-                echo "<strong style='color: red;'>{$lines[$i]}</strong>";
+        $contents = Str::replace(File::readContents($file), "\r\n", "\n");
+        $lines = Str::make($contents)->split("\n");
+        $start = Num::max((int)$line - 5, 0);
+        $end = Num::min($lines->count() - 1, (int)$line + 5);
+        $isCli = Str::match(PHP_SAPI, 'cli');
+
+        if (!$isCli) {
+            echo '<pre>';
+        }
+
+        for ($index = $start; $index <= $end; $index++) {
+            $source = (string)$lines[$index];
+            if ($isCli) {
+                echo ($index === (int)$line - 1 ? '> ' : '  ') . $source . "\n";
             } else {
-                echo $lines[$i];
+                $source = htmlspecialchars($source) . "\n";
+                echo $index === (int)$line - 1
+                    ? "<strong style='color: red;'>{$source}</strong>"
+                    : $source;
             }
         }
-        echo "</pre>";
+
+        if (!$isCli) {
+            echo '</pre>';
+        }
     }
 }

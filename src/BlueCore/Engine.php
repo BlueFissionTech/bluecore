@@ -7,6 +7,8 @@ use BlueFission\Services\Response;
 use BlueFission\Behavioral\Behaviors\Event;
 use BlueFission\Utils\Loader;
 use BlueFission\BlueCore\Security;
+use BlueFission\BlueCore\Gateway\GatewayDenied;
+use BlueFission\Val;
 
 /**
  * Class Engine
@@ -51,6 +53,40 @@ class Engine extends Application {
 	 * @var Session
 	 */
 	private $_session;
+
+	private ?GatewayDenied $_gatewayDenial = null;
+
+	public function process()
+	{
+		$this->_gatewayDenial = null;
+
+		try {
+			parent::process();
+		} catch (GatewayDenied $denial) {
+			$this->_gatewayDenial = $denial;
+		}
+
+		return $this;
+	}
+
+	public function run()
+	{
+		if ($this->denied()) {
+			return $this;
+		}
+
+		return parent::run();
+	}
+
+	public function denied(): bool
+	{
+		return Val::isNotNull($this->_gatewayDenial);
+	}
+
+	public function denial(): ?GatewayDenied
+	{
+		return $this->_gatewayDenial;
+	}
 
 	/**
 	 * Bootstraps the application, loading configurations and auto-discovering helpers and mappings
