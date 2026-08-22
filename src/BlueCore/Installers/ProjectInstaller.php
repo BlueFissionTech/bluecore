@@ -7,6 +7,8 @@ use Composer\Installer\LibraryInstaller;
 use Composer\IO\IOInterface;
 use Composer\Package\PackageInterface;
 use Composer\Repository\InstalledRepositoryInterface;
+use RuntimeException;
+use Throwable;
 
 class ProjectInstaller extends LibraryInstaller
 {
@@ -29,41 +31,94 @@ class ProjectInstaller extends LibraryInstaller
 
     public function install(InstalledRepositoryInterface $repo, PackageInterface $package)
     {
-        parent::install($repo, $package);
+        return parent::install($repo, $package)->then(function () use ($repo, $package): void {
+            try {
+                $this->copyProjectOverrides($package);
+            } catch (Throwable $exception) {
+                if ($repo->hasPackage($package)) {
+                    $repo->removePackage($package);
+                }
 
-        // Post-install copy logic for override-able dirs
-        $projectPath = $this->getInstallPath($package);
-        $rootPath = dirname($projectPath); // likely the root of the current repo
+                $this->filesystem->removeDirectory($this->getInstallPath($package));
 
-        $overrideDirs = ['addons', 'common', 'public', 'resource', 'storage', 'datasources', 'mapping'];
-
-        foreach ($overrideDirs as $dir) {
-            $sourceDir = $projectPath . DIRECTORY_SEPARATOR . $dir;
-            $rootOverride = $rootPath . DIRECTORY_SEPARATOR . $dir;
-
-            if (is_dir($sourceDir)) {
-                $this->copyMerge($sourceDir, $rootOverride);
+                throw new RuntimeException(
+                    'Unable to install project overrides for ' . $package->getPrettyName() . ': ' . $exception->getMessage(),
+                    0,
+                    $exception
+                );
             }
+        });
+    }
+
+    public function update(
+        InstalledRepositoryInterface $repo,
+        PackageInterface $initial,
+        PackageInterface $target
+    ) {
+        return parent::update($repo, $initial, $target)->then(function () use ($target): void {
+            try {
+                $this->copyProjectOverrides($target);
+            } catch (Throwable $exception) {
+                throw new RuntimeException(
+                    'Unable to update project overrides for ' . $target->getPrettyName() . ': ' . $exception->getMessage(),
+                    0,
+                    $exception
+                );
+            }
+        });
+    }
+
+    private function copyProjectOverrides(PackageInterface $package): void
+    {
+        if ($this->getInstallPath($package) !== 'core') {
+            return;
         }
 
-        $overrideFiles = ['Procfile', '.env.example', '.env', 'webpack.config.js', 'terminal', 'websocket-server.php', 'package.json'];
+        $projectPath = $this->getInstallPath($package);
+        $rootPath = dirname($projectPath);
+        $createdFiles = [];
+        $createdDirectories = [];
 
-        // Copy override files to root
-        foreach ($overrideFiles as $file) {
-            $sourceFile = $projectPath . DIRECTORY_SEPARATOR . $file;
-            $rootFile = $rootPath . DIRECTORY_SEPARATOR . $file;
+        try {
+            $overrideDirectories = ['addons', 'common', 'public', 'resource', 'storage', 'datasources', 'mapping'];
 
-            if (file_exists($sourceFile)) {
-                $this->copyIfNotExists($sourceFile, $rootFile);
+            foreach ($overrideDirectories as $directory) {
+                $source = $projectPath . DIRECTORY_SEPARATOR . $directory;
+
+                if (is_dir($source)) {
+                    $this->copyMerge(
+                        $source,
+                        $rootPath . DIRECTORY_SEPARATOR . $directory,
+                        $createdFiles,
+                        $createdDirectories
+                    );
+                }
             }
+
+            $overrideFiles = ['Procfile', '.env.example', '.env', 'webpack.config.js', 'terminal', 'websocket-server.php', 'package.json'];
+
+            foreach ($overrideFiles as $file) {
+                $source = $projectPath . DIRECTORY_SEPARATOR . $file;
+
+                if (is_file($source)) {
+                    $this->copyIfNotExists(
+                        $source,
+                        $rootPath . DIRECTORY_SEPARATOR . $file,
+                        $createdFiles,
+                        $createdDirectories
+                    );
+                }
+            }
+        } catch (Throwable $exception) {
+            $this->rollbackOverrides($createdFiles, $createdDirectories);
+
+            throw $exception;
         }
     }
 
-    private function copyMerge($source, $dest)
+    private function copyMerge($source, $destination, array &$createdFiles, array &$createdDirectories): void
     {
-        if (!is_dir($source)) return;
-
-        @mkdir($dest, 0755, true);
+        $this->ensureDirectory($destination, $createdDirectories);
 
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($source, \FilesystemIterator::SKIP_DOTS),
@@ -71,26 +126,79 @@ class ProjectInstaller extends LibraryInstaller
         );
 
         foreach ($iterator as $item) {
-            $targetPath = $dest . DIRECTORY_SEPARATOR . $iterator->getSubPathName();
+            $targetPath = $destination . DIRECTORY_SEPARATOR . $iterator->getSubPathName();
 
             if (is_dir($item)) {
-                @mkdir($targetPath, 0755, true);
+                $this->ensureDirectory($targetPath, $createdDirectories);
             } elseif (is_file($item)) {
-                $this->copyIfNotExists($item, $targetPath);
+                $this->copyIfNotExists($item->getPathname(), $targetPath, $createdFiles, $createdDirectories);
             }
         }
     }
 
-    private function copyIfNotExists($source, $dest)
+    private function copyIfNotExists(
+        $source,
+        $destination,
+        array &$createdFiles,
+        array &$createdDirectories
+    ): void
     {
-        if (!file_exists($dest)) {
-            copy($source, $dest);
+        if (file_exists($destination) || is_link($destination)) {
+            return;
+        }
+
+        $this->ensureDirectory(dirname($destination), $createdDirectories);
+        $this->filesystem->safeCopy($source, $destination);
+        $createdFiles[] = $destination;
+    }
+
+    private function ensureDirectory($directory, array &$createdDirectories): void
+    {
+        if (is_dir($directory)) {
+            return;
+        }
+
+        if (file_exists($directory) || is_link($directory)) {
+            throw new RuntimeException('Override directory is blocked by an existing path: ' . $directory);
+        }
+
+        $missing = [];
+        $current = $directory;
+
+        while (!is_dir($current)) {
+            if (file_exists($current) || is_link($current)) {
+                throw new RuntimeException('Override directory is blocked by an existing path: ' . $current);
+            }
+
+            $missing[] = $current;
+            $parent = dirname($current);
+
+            if ($parent === $current) {
+                break;
+            }
+
+            $current = $parent;
+        }
+
+        $this->filesystem->ensureDirectoryExists($directory);
+
+        foreach (array_reverse($missing) as $createdDirectory) {
+            $createdDirectories[] = $createdDirectory;
         }
     }
 
-    public function uninstall(InstalledRepositoryInterface $repo, PackageInterface $package)
+    private function rollbackOverrides(array $createdFiles, array $createdDirectories): void
     {
-        // Optional: Add cleanup if needed
-        parent::uninstall($repo, $package);
+        foreach (array_reverse($createdFiles) as $file) {
+            if (file_exists($file) || is_link($file)) {
+                $this->filesystem->unlink($file);
+            }
+        }
+
+        foreach (array_reverse($createdDirectories) as $directory) {
+            if (is_dir($directory) && count(scandir($directory)) === 2) {
+                rmdir($directory);
+            }
+        }
     }
 }

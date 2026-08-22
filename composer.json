@@ -39,6 +39,7 @@
     "scripts": {
         "lint": "@php scripts/lint.php",
         "test": "phpunit --do-not-cache-result tests",
+        "test:installer": "@php tests/Integration/project-installer-parity.php",
         "ci": [
             "Composer\\Config::disableProcessTimeout",
             "composer validate --no-check-publish --strict",
