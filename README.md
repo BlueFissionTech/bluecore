@@ -25,6 +25,12 @@ composer require bluefission/bluecore:^0.1.0-alpha
 
 The alpha line is intended for integration testing while the public API is finalized. Pin an explicit alpha constraint in reproducible environments.
 
+### Project Packages
+
+Composer packages with the `opus-project` type install into `core/` by default. Project directories and root configuration files are promoted as non-destructive overrides: existing root files are preserved, while files introduced by later project versions are added during updates. Source and distribution installs follow the same lifecycle.
+
+Set `OPUS_STANDALONE=1` to install a project package under `vendor/` without promoting root overrides.
+
 ## Usage
 
 ### Event Management
@@ -34,6 +40,21 @@ BlueCore's event management system allows you to hook into various events and fi
 ### Plugin System
 
 The plugin-based architecture allows for seamless feature additions and management. You can create plugins to extend the core functionality without modifying the core files directly.
+
+### Gateway Denials
+
+Gateways may stop a mapped controller by producing their response and throwing `GatewayDenied`. `Engine` records the denial and skips route execution without replacing the gateway-owned response. Successful gateways continue through the standard dispatch path.
+
+```php
+use BlueFission\BlueCore\Gateway\GatewayDenied;
+
+http_response_code(403);
+echo 'Forbidden';
+
+throw new GatewayDenied('Forbidden', 403);
+```
+
+Hosts can inspect `Engine::denied()` and `Engine::denial()` after processing when denial metadata is needed.
 
 ### AI Integration
 
