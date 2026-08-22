@@ -41,6 +41,21 @@ BlueCore's event management system allows you to hook into various events and fi
 
 The plugin-based architecture allows for seamless feature additions and management. You can create plugins to extend the core functionality without modifying the core files directly.
 
+### Gateway Denials
+
+Gateways may stop a mapped controller by producing their response and throwing `GatewayDenied`. `Engine` records the denial and skips route execution without replacing the gateway-owned response. Successful gateways continue through the standard dispatch path.
+
+```php
+use BlueFission\BlueCore\Gateway\GatewayDenied;
+
+http_response_code(403);
+echo 'Forbidden';
+
+throw new GatewayDenied('Forbidden', 403);
+```
+
+Hosts can inspect `Engine::denied()` and `Engine::denial()` after processing when denial metadata is needed.
+
 ### AI Integration
 
 BlueCore is designed to integrate seamlessly with AI libraries such as Automata (`bluefission/automata`), providing native compatibility and simplifying the process of building AI-powered applications.
