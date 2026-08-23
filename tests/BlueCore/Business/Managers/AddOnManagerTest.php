@@ -214,7 +214,7 @@ class AddOnManagerTest extends TestCase
         $this->assertSame(['namespaced', 'legacy'], $GLOBALS['bluecore_hook_calls']);
     }
 
-    public function testMissingHookReturnsStructuredDiagnostics(): void
+    public function testMissingHookReturnsOptionalSkippedOutcome(): void
     {
         $manager = new TestableAddOnManager(new FakeAddOnModel());
         $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'missing';
@@ -229,13 +229,98 @@ class AddOnManagerTest extends TestCase
 
         $result = $manager->hook($addOn, 'install');
 
-        $this->assertFalse($result['ok']);
-        $this->assertSame('missing_callable', $result['status']);
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['optional']);
+        $this->assertSame('skipped', $result['status']);
         $this->assertSame(
             ['Vendor\\Package\\missing_install', 'missing_install'],
             $result['attempted']
         );
-        $this->assertNotEmpty($result['error']);
+        $this->assertNull($result['error']);
+    }
+
+    public function testInstallBlocksBeforeDatasourceWhenPrimaryFileIsMissing(): void
+    {
+        $this->writeDefinition('missingprimary', createPrimaryFile: false);
+        $model = new FakeAddOnModel();
+        $datasource = new FakeDatasourceManager();
+        $manager = new TestableAddOnManager($model, $datasource);
+
+        $result = $manager->install('missingprimary');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('hook', $result['stage']);
+        $this->assertSame('missing_primary_file', $result['hooks'][0]['status']);
+        $this->assertFalse($result['hooks'][0]['optional']);
+        $this->assertSame(0, $datasource->migrationRuns);
+        $this->assertSame([], $model->records);
+    }
+
+    public function testThrownInstallHookPreventsRegistrationWrite(): void
+    {
+        $this->writeDefinition('failinginstall');
+        File::ensureFile(
+            self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'failinginstall' . DIRECTORY_SEPARATOR . 'main.php',
+            "<?php function failinginstall_install(): void { throw new RuntimeException('Install hook failed.'); }",
+            true
+        );
+        $model = new FakeAddOnModel();
+        $manager = new TestableAddOnManager($model, new FakeDatasourceManager());
+
+        $result = $manager->install('failinginstall');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('hook', $result['stage']);
+        $this->assertSame('failed', $result['hooks'][0]['status']);
+        $this->assertSame(\RuntimeException::class, $result['hooks'][0]['exception']);
+        $this->assertSame('retry_hook', $result['nextAction']);
+        $this->assertSame([], $model->records);
+    }
+
+    public function testThrownUninstallHookPreservesRegistration(): void
+    {
+        $this->writeDefinition('failinguninstall');
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'failinguninstall';
+        File::ensureFile(
+            $path . DIRECTORY_SEPARATOR . 'main.php',
+            "<?php function failinguninstall_uninstall(): void { throw new RuntimeException('Uninstall hook failed.'); }",
+            true
+        );
+        $model = new FakeAddOnModel([[
+            'addon_id' => 9,
+            'name' => 'failinguninstall',
+            'path' => $path,
+            'primary_file' => 'main.php',
+            'is_active' => 1,
+        ]]);
+        $manager = new TestableAddOnManager($model, new FakeDatasourceManager());
+
+        $result = $manager->uninstall(9);
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('hook', $result['stage']);
+        $this->assertSame('Uninstall hook failed.', $result['error']);
+        $this->assertCount(1, $model->records);
+        $this->assertSame([], $model->deletes);
+    }
+
+    public function testInstallAllCountsNormalizedHookOutcomes(): void
+    {
+        $this->writeDefinition('batchgood');
+        $this->writeDefinition('batchfail');
+        File::ensureFile(
+            self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'batchfail' . DIRECTORY_SEPARATOR . 'main.php',
+            "<?php function batchfail_install(): void { throw new RuntimeException('Batch hook failed.'); }",
+            true
+        );
+        $manager = new TestableAddOnManager(new FakeAddOnModel(), new FakeDatasourceManager());
+
+        $result = $manager->installAll();
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame(2, $result['total']);
+        $this->assertSame(1, $result['succeeded']);
+        $this->assertSame(1, $result['failed']);
     }
 
     public function testPrimaryFilePrefersReachableConfiguredCandidate(): void
@@ -610,7 +695,7 @@ PHP,
         $this->assertSame([], $model->records);
     }
 
-    private function writeDefinition(string $name): void
+    private function writeDefinition(string $name, bool $createPrimaryFile = true): void
     {
         File::ensureFile(
             self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . $name . DIRECTORY_SEPARATOR . 'definition.json',
@@ -621,6 +706,14 @@ PHP,
             ]),
             true
         );
+
+        if ($createPrimaryFile) {
+            File::ensureFile(
+                self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . $name . DIRECTORY_SEPARATOR . 'main.php',
+                '<?php',
+                true
+            );
+        }
     }
 
     private function removeDir($dir): void

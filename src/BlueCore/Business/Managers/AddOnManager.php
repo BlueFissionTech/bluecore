@@ -68,6 +68,14 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
         $addon->assign($data);
         $addon->path = $addOnPath;
 
+        $hookPreflight = $this->resolvePrimaryFile($addon);
+        if (Flag::isFalse($hookPreflight['ok'])) {
+            $hookResult = $this->callHook($addon, 'install');
+            $result['hooks'][] = $hookResult;
+
+            return $this->withHookFailure($result, $hookResult, 'install');
+        }
+
         $datasource = $this->datasourceManager();
         $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
         $datasource->setGeneratorDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR);
@@ -81,6 +89,10 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
         if (Arr::is($hookResult)) {
             $result['hooks'][] = $hookResult;
         }
+        if (Flag::isFalse(Arr::getPath($hookResult, 'ok', false))) {
+            return $this->withHookFailure($result, $hookResult, 'install');
+        }
+
         $this->_model->write($addon);
         $result['changed'] = true;
         $result['stage'] = 'complete';
@@ -115,6 +127,9 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             $hookResult = $this->callHook($addon, 'uninstall');
             if (Arr::is($hookResult)) {
                 $result['hooks'][] = $hookResult;
+            }
+            if (Flag::isFalse(Arr::getPath($hookResult, 'ok', false))) {
+                return $this->withHookFailure($result, $hookResult, 'uninstall');
             }
 
             $result['stage'] = 'definition';
@@ -345,18 +360,23 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
         $result = Arr::make([
             'ok' => false,
             'hook' => $hook,
+            'stage' => 'hook',
             'status' => 'pending',
+            'optional' => false,
             'strategy' => null,
             'callable' => null,
             'attempted' => [],
             'primaryFile' => $resolution['path'],
             'primaryFileResolution' => $resolution,
             'error' => null,
+            'exception' => null,
+            'nextAction' => null,
         ]);
 
         if (Flag::isFalse($resolution['ok'])) {
             $result->set('status', $resolution['status']);
             $result->set('error', $resolution['error']);
+            $result->set('nextAction', 'review_primary_file');
 
             return $result->toArray();
         }
@@ -377,19 +397,42 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
                 continue;
             }
 
-            Func::make($candidate)->call();
-            $result->set('ok', true);
-            $result->set('status', 'called');
-            $result->set('strategy', $candidate === $legacyHook ? 'legacy' : 'namespaced');
-            $result->set('callable', $candidate);
+            try {
+                Func::make($candidate)->call();
+                $result->set('ok', true);
+                $result->set('status', 'called');
+                $result->set('strategy', $candidate === $legacyHook ? 'legacy' : 'namespaced');
+                $result->set('callable', $candidate);
+            } catch (\Throwable $exception) {
+                $result->set('status', 'failed');
+                $result->set('strategy', $candidate === $legacyHook ? 'legacy' : 'namespaced');
+                $result->set('callable', $candidate);
+                $result->set('error', $exception->getMessage());
+                $result->set('exception', $exception::class);
+                $result->set('nextAction', 'retry_hook');
+            }
 
             return $result->toArray();
         }
 
-        $result->set('status', 'missing_callable');
-        $result->set('error', 'No compatible lifecycle hook callable was found.');
+		$result->set('ok', true);
+		$result->set('status', 'skipped');
+		$result->set('optional', true);
 
-        return $result->toArray();
+		return $result->toArray();
+	}
+
+    private function withHookFailure(array $result, array $hookResult, string $action): array
+    {
+        $result['ok'] = false;
+        $result['changed'] = false;
+        $result['stage'] = 'hook';
+        $result['nextAction'] = Arr::getPath($hookResult, 'nextAction', "retry_{$action}");
+        $result['error'] = Arr::getPath($hookResult, 'error', 'Add-on lifecycle hook failed.');
+        $result['messages'][] = $result['error'];
+        $result['modelStatus'] = $this->_model->status();
+
+        return $result;
     }
 
     protected function resolvePrimaryFile(AddOn $addOn): array

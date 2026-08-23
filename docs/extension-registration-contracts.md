@@ -26,6 +26,12 @@ Add-on lifecycle managers implement `IAddOnLifecycleManager`:
 
 Lifecycle methods return structured arrays so callers can compose results, log decisions, and avoid process termination.
 
+Install and uninstall hooks are optional. When a reachable primary file has no
+compatible hook callable, the hook result is `ok=true`, `status=skipped`, and
+`optional=true`. A missing or unsafe configured primary file remains blocking, as
+does an exception thrown by a discovered hook. Blocking hook failures stop before
+registration state is written or removed and retain structured retry diagnostics.
+
 An active add-on primary file may return a callable registration factory. When
 the application and baseline registration plan are supplied together, BlueCore
 invokes that factory with `(Application $application, RegistrationPlan $plan)`
