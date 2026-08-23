@@ -94,10 +94,16 @@ final class ComposerMetadataTest extends TestCase
     public function testReleaseDocumentationUsesAlphaConstraint(): void
     {
         $readme = Str::make(File::readContents($this->rootFile('README.md')));
+        $release = Str::make(
+            File::readContents($this->rootFile('docs/releases/v0.1.2-alpha.md'))
+        );
 
         $this->assertTrue(
-            $readme->has('composer require bluefission/bluecore:^0.1.0-alpha')
+            $readme->has('composer require bluefission/bluecore:^0.1.2@alpha')
         );
+        $this->assertTrue($release->has('bluefission/bluecore:^0.1.2@alpha'));
+        $this->assertTrue($release->has('DevElation `^1.3.41`'));
+        $this->assertTrue($release->has('Packagist resolves the tag to the same commit'));
     }
 
     public function testContinuousIntegrationCoversSupportedPhpVersions(): void
