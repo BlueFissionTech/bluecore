@@ -15,4 +15,5 @@ interface IAddOnLifecycleManager
         ?Application $application = null,
         ?RegistrationPlan $plan = null
     ): array;
+    public function loadActivatedContributions(string $name): array;
 }
