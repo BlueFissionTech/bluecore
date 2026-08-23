@@ -4,6 +4,8 @@ namespace BlueFission\Tests\BlueCore\Business\Managers;
 
 use BlueFission\BlueCore\Business\Managers\AddOnManager;
 use BlueFission\BlueCore\Domain\AddOn\AddOn;
+use BlueFission\Collections\Collection;
+use BlueFission\Collections\Group;
 use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -423,6 +425,72 @@ class AddOnManagerTest extends TestCase
         $this->assertSame('Persisted add-on row is missing addon_id.', $result['results'][1]['error']);
     }
 
+    #[DataProvider('collectionContainerProvider')]
+    public function testBulkLifecyclePreservesCollectionRowsAndNamespaceRoundTrips(string $container): void
+    {
+        $namespace = 'BlueFission\\Fixtures\\InstalledAddOn';
+        $records = [
+            [
+                'addon_id' => 31,
+                'name' => 'first',
+                'namespace' => $namespace,
+                'path' => '/addons/first',
+                'primary_file' => 'main.php',
+                'is_active' => 0,
+            ],
+            [
+                'addon_id' => 32,
+                'name' => 'second',
+                'namespace' => 'BlueFission\\Fixtures\\SecondAddOn',
+                'path' => '/addons/second',
+                'primary_file' => 'bootstrap.php',
+                'is_active' => 0,
+            ],
+        ];
+        $model = new FakeAddOnModel($records, containerClass: $container);
+        $manager = new TestableAddOnManager($model);
+
+        $activated = $manager->activateAll();
+        $deactivated = $manager->deactivateAll();
+
+        $this->assertTrue($activated['ok']);
+        $this->assertSame(2, $activated['total']);
+        $this->assertSame($records[0], $activated['results'][0]['record']);
+        $this->assertSame($namespace, $activated['results'][0]['record']['namespace']);
+        $this->assertTrue($deactivated['ok']);
+        $this->assertSame(2, $deactivated['total']);
+        $this->assertSame($namespace, $model->records[0]['namespace']);
+        $this->assertSame([1, 1, 0, 0], array_column($model->writes, 'is_active'));
+    }
+
+    public static function collectionContainerProvider(): array
+    {
+        return [
+            'collection' => [Collection::class],
+            'group' => [Group::class],
+        ];
+    }
+
+    public function testDeactivateAllFailsClosedForMalformedRowsAndWriteFailures(): void
+    {
+        $model = new FakeAddOnModel([
+            ['addon_id' => 41, 'name' => 'failed', 'is_active' => 1],
+            ['name' => 'malformed', 'is_active' => 1],
+        ], containerClass: Group::class, failWritesForIds: [41]);
+        $manager = new TestableAddOnManager($model);
+
+        $result = $manager->deactivateAll();
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('deactivate_all', $result['action']);
+        $this->assertSame(2, $result['total']);
+        $this->assertSame(0, $result['succeeded']);
+        $this->assertSame(2, $result['failed']);
+        $this->assertSame('registration', $result['results'][0]['stage']);
+        $this->assertSame('failed', $result['results'][1]['stage']);
+        $this->assertSame('malformed', $result['results'][1]['record']['name']);
+    }
+
     public function testRepeatedInstallUsesSupportedModelOperationsAndDoesNotDuplicateRegistration(): void
     {
         $this->writeDefinition('demo');
@@ -585,6 +653,7 @@ class FakeAddOnModel
     public function __construct(
         array $addons = [],
         private bool $returnArrays = false,
+        private ?string $containerClass = null,
         private array $failWritesForIds = []
     )
     {
@@ -659,13 +728,15 @@ class FakeAddOnModel
         return $this->current;
     }
 
-    public function all(): array
+    public function all(): mixed
     {
-        if ($this->returnArrays) {
-            return $this->records;
-        }
+        $records = $this->returnArrays
+            ? $this->records
+            : array_map(static fn($record) => (object)$record, $this->records);
 
-        return array_map(static fn($record) => (object)$record, $this->records);
+        return $this->containerClass === null
+            ? $records
+            : new $this->containerClass($records);
     }
 
     public function delete($values): void
