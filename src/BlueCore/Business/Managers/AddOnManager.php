@@ -15,11 +15,12 @@ use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
 use BlueFission\BlueCore\Domain\AddOn\Models\AddOnModel;
 use BlueFission\BlueCore\Domain\AddOn\AddOn;
+use BlueFission\BlueCore\Contracts\IAddOnLifecycleManager;
 use BlueFission\Str;
 use BlueFission\System\System;
 use BlueFission\Val;
 
-class AddOnManager extends Service
+class AddOnManager extends Service implements IAddOnLifecycleManager
 {
     private $_loader;
     protected $_model;
@@ -66,11 +67,19 @@ class AddOnManager extends Service
         $datasource = $this->datasourceManager();
         $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
         $datasource->setGeneratorDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR);
-        ob_start();
-        $datasource->runMigrations($name);
+        $migrationResult = $datasource->runMigrations($data->name);
+        $result['migrations'] = $migrationResult;
+        if (Flag::isFalse(Arr::getPath($migrationResult, 'ok', false))) {
+            $result['ok'] = false;
+            $result['stage'] = 'datasource';
+            $result['nextAction'] = 'retry_install';
+            $result['error'] = Arr::getPath($migrationResult, 'error', 'Add-on migration failed.');
+            $result['messages'][] = $result['error'];
+
+            return $result;
+        }
+
         $datasource->populate();
-        $result['messages'][] = ob_get_contents();
-        ob_end_clean();
 
         $hookResult = $this->callHook($addon, 'install');
         if (Arr::is($hookResult)) {
@@ -190,6 +199,40 @@ class AddOnManager extends Service
         $this->_model->write(['addon_id' => $addOnId, 'is_active' => 0]);
 
         return $this->lifecycleResult('deactivate', (string)$addOnId, $this->_model->status(), $this->_model->query());
+    }
+
+    public function migrate($addOnId): array
+    {
+        $addOn = $this->getAddOnById($addOnId);
+        $result = $this->lifecycleResult('migrate', (string)$addOn->name);
+        $result['stage'] = 'datasource';
+
+        try {
+            $datasource = $this->datasourceManager();
+            $datasource->setDeltaDirectory(
+                $addOn->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR
+            );
+            $datasource->setGeneratorDirectory(
+                $addOn->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR
+            );
+            $migrationResult = $datasource->runMigrations($addOn->name);
+            $result['migrations'] = $migrationResult;
+            $result['ok'] = Flag::parseBool(Arr::getPath($migrationResult, 'ok', false));
+            $result['changed'] = Flag::parseBool(Arr::getPath($migrationResult, 'changed', false));
+            $result['stage'] = $result['ok'] ? 'complete' : 'datasource';
+            $result['nextAction'] = $result['ok'] ? null : 'retry_migrate';
+            $result['error'] = Arr::getPath($migrationResult, 'error');
+            if (Val::isNotEmpty($result['error'])) {
+                $result['messages'][] = $result['error'];
+            }
+        } catch (\Throwable $exception) {
+            $result['ok'] = false;
+            $result['nextAction'] = 'retry_migrate';
+            $result['error'] = $exception->getMessage();
+            $result['messages'][] = $exception->getMessage();
+        }
+
+        return $result;
     }
 
     public function showAllAddOns()
@@ -681,6 +724,7 @@ class AddOnManager extends Service
             'messages' => $ok ? [] : ['Add-on registration could not be updated.'],
             'dependencies' => [],
             'hooks' => [],
+            'migrations' => [],
             'modelStatus' => $modelStatus,
             'query' => $query,
         ])->toArray();
