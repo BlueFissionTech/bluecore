@@ -26,6 +26,12 @@ Add-on lifecycle managers implement `IAddOnLifecycleManager`:
 
 Lifecycle methods return structured arrays so callers can compose results, log decisions, and avoid process termination.
 
+Datasource migration and population are reported as distinct result blocks. Population
+stops on the first material generator failure, identifies completed and failed
+generators, and uses `review_population_failure` as its next action because BlueCore
+cannot guarantee that an arbitrary generator is retry-idempotent. Installation does
+not continue to hooks or registration writes after such a failure.
+
 `migrate()` refreshes the datasource structure of an already-installed add-on
 without installing dependencies or populating data. Migration history is
 filtered by the add-on batch before pending deltas are discovered. Successful

@@ -506,6 +506,26 @@ class AddOnManagerTest extends TestCase
         $this->assertSame(['001_initial.php'], $datasource->appliedFor('demo'));
     }
 
+    public function testPopulationFailurePreventsHooksAndRegistrationWrite(): void
+    {
+        $this->writeDefinition('demo');
+        $model = new FakeAddOnModel();
+        $datasource = new FakeDatasourceManager();
+        $datasource->failPopulation('DemoSeeder.php failed.');
+        $manager = new TestableAddOnManager($model, $datasource);
+
+        $result = $manager->install('demo');
+
+        $this->assertFalse($result['ok']);
+        $this->assertFalse($result['changed']);
+        $this->assertSame('datasource', $result['stage']);
+        $this->assertSame('review_population_failure', $result['nextAction']);
+        $this->assertSame('DemoSeeder.php failed.', $result['error']);
+        $this->assertSame('DemoSeeder.php', $result['population']['results'][0]['name']);
+        $this->assertSame(1, $datasource->populationRuns);
+        $this->assertSame([], $model->records);
+    }
+
     public function testFailedTeardownPreservesRegistrationForRetry(): void
     {
         $this->writeDefinition('demo');
@@ -764,6 +784,7 @@ class FakeDatasourceManager
     private array $published = [];
     private array $applied = [];
     private ?string $failedMigration = null;
+    private ?string $populationError = null;
 
     public function __construct(private bool $failRollback = false)
     {
@@ -792,6 +813,11 @@ class FakeDatasourceManager
     public function appliedFor(string $batch): array
     {
         return $this->applied[$batch] ?? [];
+    }
+
+    public function failPopulation(?string $message): void
+    {
+        $this->populationError = $message;
     }
 
     public function runMigrations(string $batch): array
@@ -843,9 +869,41 @@ class FakeDatasourceManager
         ];
     }
 
-    public function populate(): void
+    public function populate(): array
     {
         $this->populationRuns++;
+
+        if (\BlueFission\Val::isNotEmpty($this->populationError)) {
+            return [
+                'ok' => false,
+                'changed' => false,
+                'stage' => 'population',
+                'total' => 1,
+                'populated' => 0,
+                'failed' => 1,
+                'results' => [[
+                    'ok' => false,
+                    'name' => 'DemoSeeder.php',
+                    'status' => 'failed',
+                    'error' => $this->populationError,
+                    'exception' => \RuntimeException::class,
+                ]],
+                'nextAction' => 'review_population_failure',
+                'error' => $this->populationError,
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'changed' => false,
+            'stage' => 'complete',
+            'total' => 0,
+            'populated' => 0,
+            'failed' => 0,
+            'results' => [],
+            'nextAction' => null,
+            'error' => null,
+        ];
     }
 
     public function revertBatch(string $batch): void

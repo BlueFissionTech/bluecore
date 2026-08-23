@@ -79,7 +79,17 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             return $result;
         }
 
-        $datasource->populate();
+		$populationResult = $datasource->populate();
+		$result['population'] = $populationResult;
+		if (Flag::isFalse(Arr::getPath($populationResult, 'ok', false))) {
+			$result['ok'] = false;
+			$result['stage'] = 'datasource';
+			$result['nextAction'] = 'review_population_failure';
+			$result['error'] = Arr::getPath($populationResult, 'error', 'Add-on population failed.');
+			$result['messages'][] = $result['error'];
+
+			return $result;
+		}
 
         $hookResult = $this->callHook($addon, 'install');
         if (Arr::is($hookResult)) {
@@ -724,7 +734,8 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             'messages' => $ok ? [] : ['Add-on registration could not be updated.'],
             'dependencies' => [],
             'hooks' => [],
-            'migrations' => [],
+			'migrations' => [],
+			'population' => [],
             'modelStatus' => $modelStatus,
             'query' => $query,
         ])->toArray();
