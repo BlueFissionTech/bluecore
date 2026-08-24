@@ -25,6 +25,7 @@ Add-on lifecycle managers implement `IAddOnLifecycleManager`:
 - `activateAll(): array`
 - `deactivate($addOnId): array`
 - `deactivateAll(): array`
+- `loadActivatedAddOns(?Application $application = null, ?RegistrationPlan $plan = null): array`
 
 Lifecycle methods return structured arrays so callers can compose results, log decisions, and avoid process termination.
 
@@ -34,6 +35,19 @@ retains the exact persisted row used for the operation, including identifiers,
 namespace separators, paths, primary files, and activation state. A malformed
 row or failed storage write makes the aggregate result fail while preserving
 the per-row diagnostic and leaving other rows visible to the caller.
+
+An active add-on primary file may return a callable registration factory. When
+the application and baseline registration plan are supplied together, BlueCore
+invokes that factory with `(Application $application, RegistrationPlan $plan)`
+once per manager lifecycle. A factory may accept fewer arguments when it does
+not need the full context. Repeated loading reports `already_registered`
+without executing the factory again. Calls without a registration context keep
+the callable available and report `pending`, while legacy primary files that do
+not return a callable report `not_applicable`.
+
+Factory failures report the registration stage, primary file, original
+exception class, and message. A failed factory is not marked as registered, so
+a later lifecycle call can retry it.
 
 ## Theme Registry
 

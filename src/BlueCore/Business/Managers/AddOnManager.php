@@ -11,6 +11,8 @@ use BlueFission\Data\Storage\Storage;
 use BlueFission\Func;
 use BlueFission\Net\HTTP;
 use BlueFission\Flag;
+use BlueFission\BlueCore\Registration\RegistrationPlan;
+use BlueFission\Services\Application;
 use BlueFission\Services\Service;
 use BlueFission\Utils\Loader;
 use BlueFission\Utils\File;
@@ -25,6 +27,8 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 {
     private $_loader;
     protected $_model;
+    private array $_loadedAddOns = [];
+    private array $_registeredAddOns = [];
 
     public function __construct(MySQLLink $link)
     {
@@ -243,15 +247,63 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
         return $list;
     }
 
-    public function loadActivatedAddOns()
+    public function loadActivatedAddOns(
+        ?Application $application = null,
+        ?RegistrationPlan $plan = null
+    ): array
     {
+        if (($application === null) !== ($plan === null)) {
+            throw new \InvalidArgumentException(
+                'Application and registration plan must be provided together.'
+            );
+        }
+
         $addOns = $this->_model->getActivatedAddOns();
         $results = Arr::make([]);
 
         foreach ($addOns as $addOn) {
             $object = new AddOn;
             $object->assign($addOn);
-            $results->push($this->loadAddOn($object));
+            $load = $this->loadAddOn($object);
+
+            if (Flag::isFalse($load['ok']) || !Func::isCallable($load['value'] ?? null)) {
+                $load['registration'] = $this->registrationResult(
+                    Flag::isFalse($load['ok']) ? 'load_failed' : 'not_applicable'
+                );
+                $results->push($load);
+                continue;
+            }
+
+            if ($application === null || $plan === null) {
+                $load['registration'] = $this->registrationResult('pending');
+                $results->push($load);
+                continue;
+            }
+
+            $key = $this->addOnRuntimeKey($object, $load['path']);
+            if (Arr::hasKey($this->_registeredAddOns, $key)) {
+                $load['registration'] = $this->registrationResult('already_registered');
+                $results->push($load);
+                continue;
+            }
+
+            try {
+                Func::make($load['value'])->call($application, $plan);
+                $this->_registeredAddOns[$key] = true;
+                $load['registration'] = $this->registrationResult('registered', true);
+            } catch (\Throwable $exception) {
+                $load['ok'] = false;
+                $load['stage'] = 'registration';
+                $load['error'] = $exception->getMessage();
+                $load['exception'] = $exception::class;
+                $load['registration'] = $this->registrationResult(
+                    'failed',
+                    false,
+                    $exception
+                );
+            }
+
+            $results->push($load);
         }
 
         return $results->toArray();
@@ -264,10 +316,45 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             return $resolution;
         }
 
+        $key = $this->addOnRuntimeKey($addOn, $resolution['path']);
+        if (Arr::hasKey($this->_loadedAddOns, $key)) {
+            $loaded = $this->_loadedAddOns[$key];
+            $loaded['status'] = 'already_loaded';
+            $loaded['changed'] = false;
+
+            return $loaded;
+        }
+
         $resolution['value'] = require_once($resolution['path']);
         $resolution['status'] = 'loaded';
+        $resolution['stage'] = 'load';
+        $resolution['changed'] = true;
+        $this->_loadedAddOns[$key] = $resolution;
 
         return $resolution;
+    }
+
+    private function addOnRuntimeKey(AddOn $addOn, string $primaryFile): string
+    {
+        $identifier = Val::isNotEmpty($addOn->addon_id)
+            ? (string)$addOn->addon_id
+            : (string)$addOn->name;
+
+        return Str::lower(Str::trim($identifier)) . ':' . Path::normalize($primaryFile);
+    }
+
+    private function registrationResult(
+        string $status,
+        bool $executed = false,
+        ?\Throwable $exception = null
+    ): array {
+        return Arr::make([
+            'ok' => $exception === null && $status !== 'load_failed',
+            'status' => $status,
+            'executed' => $executed,
+            'error' => $exception?->getMessage(),
+            'exception' => $exception === null ? null : $exception::class,
+        ])->toArray();
     }
 
     protected function callHook(AddOn $addOn, $hook)

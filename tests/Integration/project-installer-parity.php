@@ -62,6 +62,7 @@ function createPluginPackage(string $workspace, string $root): string
             ],
             'extra' => [
                 'class' => 'BlueFission\\BlueCore\\Installers\\PluginInstaller',
+                'plugin-modifies-install-path' => true,
             ],
         ]),
         true
@@ -124,6 +125,16 @@ function writeFixtureVersion(string $source, string $version, array $overrides):
         true
     );
     File::ensureFile($source . DIRECTORY_SEPARATOR . 'marker.txt', $version, true);
+    File::ensureFile(
+        $source . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'Project' . DIRECTORY_SEPARATOR . 'Marker.php',
+        "<?php\n\nnamespace BlueFission\\InstallerFixture\\Project;\n\nfinal class Marker {}\n",
+        true
+    );
+    File::ensureFile(
+        $source . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'AddOn' . DIRECTORY_SEPARATOR . 'Marker.php',
+        "<?php\n\nnamespace BlueFission\\InstallerFixture\\AddOn;\n\nfinal class Marker {}\n",
+        true
+    );
 
     foreach (Arr::make($overrides) as $path => $contents) {
         File::ensureFile($source . DIRECTORY_SEPARATOR . $path, $contents, true);
@@ -169,8 +180,19 @@ function verifyTransport(string $workspace, string $plugin, array $fixture, stri
     assertProcessSucceeded($install, "{$transport} install");
     assertCleanComposerOutput($install, "{$transport} install");
     assertFile($consumer . DIRECTORY_SEPARATOR . 'core' . DIRECTORY_SEPARATOR . 'marker.txt', '1.0.0');
+    assertFile($consumer . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'addon-installer-fixture' . DIRECTORY_SEPARATOR . 'marker.txt', '1.0.0');
     assertFile($consumer . DIRECTORY_SEPARATOR . 'common' . DIRECTORY_SEPARATOR . 'config.php', 'version-one');
     assertFile($consumer . DIRECTORY_SEPARATOR . 'package.json', '{"version":"1.0.0"}');
+    assertInstalledTopology($consumer);
+
+    $repeat = runProcess(
+        composerCommand($composer, ['install', '--no-interaction', '--no-progress', "--prefer-{$transport}"]),
+        $consumer,
+        true
+    );
+    assertProcessSucceeded($repeat, "{$transport} repeated install");
+    assertCleanComposerOutput($repeat, "{$transport} repeated install");
+    assertInstalledTopology($consumer);
 
     writeConsumerManifest($consumer, $plugin, $fixture, '1.1.0');
     $update = runProcess(
@@ -195,6 +217,7 @@ function verifyTransport(string $workspace, string $plugin, array $fixture, stri
         throw new RuntimeException("{$transport} uninstall left the project install path behind.");
     }
     assertFile($consumer . DIRECTORY_SEPARATOR . 'common' . DIRECTORY_SEPARATOR . 'config.php', 'version-one');
+    assertInstalledPackage($consumer, 'bluefission/addon-installer-fixture');
 }
 
 function verifyFailureRollback(string $workspace, string $plugin, array $fixture, string $composer): void
@@ -234,6 +257,26 @@ function writeConsumerManifest(string $consumer, string $plugin, array $fixture,
                 'url' => Str::replace($fixture['source'], DIRECTORY_SEPARATOR, '/'),
                 'reference' => $candidate,
             ],
+            'autoload' => [
+                'psr-4' => ['BlueFission\\InstallerFixture\\Project\\' => 'src/Project/'],
+            ],
+        ])
+        ->push([
+            'name' => 'bluefission/addon-installer-fixture',
+            'version' => '1.0.0',
+            'type' => 'opus-addon',
+            'dist' => [
+                'type' => 'zip',
+                'url' => fileUrl($fixture['dist']['1.0.0']),
+            ],
+            'source' => [
+                'type' => 'git',
+                'url' => Str::replace($fixture['source'], DIRECTORY_SEPARATOR, '/'),
+                'reference' => '1.0.0',
+            ],
+            'autoload' => [
+                'psr-4' => ['BlueFission\\InstallerFixture\\AddOn\\' => 'src/AddOn/'],
+            ],
         ])
         ->toArray();
     $repositories = Arr::make([
@@ -256,6 +299,7 @@ function writeConsumerManifest(string $consumer, string $plugin, array $fixture,
             'require' => [
                 'bluefission/bluecore' => '0.0.0',
                 'bluefission/project-installer-fixture' => $version,
+                'bluefission/addon-installer-fixture' => '1.0.0',
             ],
             'minimum-stability' => 'dev',
             'prefer-stable' => true,
@@ -265,6 +309,29 @@ function writeConsumerManifest(string $consumer, string $plugin, array $fixture,
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
         true
     );
+}
+
+function assertInstalledTopology(string $consumer): void
+{
+    assertInstalledPackage($consumer, 'bluefission/project-installer-fixture');
+    assertInstalledPackage($consumer, 'bluefission/addon-installer-fixture');
+
+    $autoload = runProcess([
+        PHP_BINARY,
+        '-r',
+        "require 'vendor/autoload.php'; exit(class_exists('BlueFission\\InstallerFixture\\Project\\Marker') && class_exists('BlueFission\\InstallerFixture\\AddOn\\Marker') ? 0 : 1);",
+    ], $consumer, true);
+    assertProcessSucceeded($autoload, 'generated autoload verification');
+}
+
+function assertInstalledPackage(string $consumer, string $package): void
+{
+    $installed = runProcess([
+        PHP_BINARY,
+        '-r',
+        "require 'vendor/autoload.php'; exit(Composer\\InstalledVersions::isInstalled('{$package}') ? 0 : 1);",
+    ], $consumer, true);
+    assertProcessSucceeded($installed, "InstalledVersions verification for {$package}");
 }
 
 /**

@@ -2,6 +2,9 @@
 
 namespace BlueFission\BlueCore\Contracts;
 
+use BlueFission\BlueCore\Registration\RegistrationPlan;
+use BlueFission\Services\Application;
+
 interface IAddOnLifecycleManager
 {
     public function install($name, bool $installDependencies = false): array;
@@ -11,4 +14,8 @@ interface IAddOnLifecycleManager
     public function activateAll(): array;
     public function deactivate($addOnId): array;
     public function deactivateAll(): array;
+    public function loadActivatedAddOns(
+        ?Application $application = null,
+        ?RegistrationPlan $plan = null
+    ): array;
 }
