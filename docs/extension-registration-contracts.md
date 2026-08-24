@@ -30,6 +30,12 @@ Add-on lifecycle managers implement `IAddOnLifecycleManager`:
 
 Lifecycle methods return structured arrays so callers can compose results, log decisions, and avoid process termination.
 
+Install and uninstall hooks are optional. When a reachable primary file has no
+compatible hook callable, the hook result is `ok=true`, `status=skipped`, and
+`optional=true`. A missing or unsafe configured primary file remains blocking, as
+does an exception thrown by a discovered hook. Blocking hook failures stop before
+registration state is written or removed and retain structured retry diagnostics.
+
 Datasource migration and population are reported as distinct result blocks. Population
 stops on the first material generator failure, identifies completed and failed
 generators, and uses `review_population_failure` as its next action because BlueCore
