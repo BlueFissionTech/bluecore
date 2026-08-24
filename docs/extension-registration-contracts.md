@@ -19,10 +19,14 @@ Registrars implement `BlueFission\BlueCore\Contracts\IApplicationRegistrar` and 
 Add-on lifecycle managers implement `IAddOnLifecycleManager`:
 
 - `install($name, bool $installDependencies = false): array`
+- `installAll(bool $installDependencies = false): array`
 - `uninstall($addOnId, bool $removeDependencies = false): array`
 - `activate($addOnId): array`
+- `activateAll(): array`
 - `deactivate($addOnId): array`
 - `migrate($addOnId): array`
+- `deactivateAll(): array`
+- `loadActivatedAddOns(?Application $application = null, ?RegistrationPlan $plan = null): array`
 
 Lifecycle methods return structured arrays so callers can compose results, log decisions, and avoid process termination.
 
@@ -32,6 +36,26 @@ filtered by the add-on batch before pending deltas are discovered. Successful
 deltas are idempotent on repeat; failed deltas stop the batch, retain their
 exception diagnostics, and report `retry_migrate` without marking the
 lifecycle operation complete.
+
+Bulk lifecycle operations normalize DevElation `Collection` and `Group`
+containers through the collection API before processing their rows. Each result
+retains the exact persisted row used for the operation, including identifiers,
+namespace separators, paths, primary files, and activation state. A malformed
+row or failed storage write makes the aggregate result fail while preserving
+the per-row diagnostic and leaving other rows visible to the caller.
+
+An active add-on primary file may return a callable registration factory. When
+the application and baseline registration plan are supplied together, BlueCore
+invokes that factory with `(Application $application, RegistrationPlan $plan)`
+once per manager lifecycle. A factory may accept fewer arguments when it does
+not need the full context. Repeated loading reports `already_registered`
+without executing the factory again. Calls without a registration context keep
+the callable available and report `pending`, while legacy primary files that do
+not return a callable report `not_applicable`.
+
+Factory failures report the registration stage, primary file, original
+exception class, and message. A failed factory is not marked as registered, so
+a later lifecycle call can retry it.
 
 ## Theme Registry
 

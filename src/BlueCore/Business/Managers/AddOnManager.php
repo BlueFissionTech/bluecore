@@ -4,18 +4,21 @@ namespace BlueFission\BlueCore\Business\Managers;
 
 use BlueFission\Arr;
 use BlueFission\Connections\Database\MySQLLink;
+use BlueFission\Collections\ICollection;
+use BlueFission\BlueCore\Contracts\IAddOnLifecycleManager;
 use BlueFission\Data\FileSystem;
 use BlueFission\Data\Storage\Storage;
 use BlueFission\Func;
 use BlueFission\Net\HTTP;
 use BlueFission\Flag;
+use BlueFission\BlueCore\Registration\RegistrationPlan;
+use BlueFission\Services\Application;
 use BlueFission\Services\Service;
 use BlueFission\Utils\Loader;
 use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
 use BlueFission\BlueCore\Domain\AddOn\Models\AddOnModel;
 use BlueFission\BlueCore\Domain\AddOn\AddOn;
-use BlueFission\BlueCore\Contracts\IAddOnLifecycleManager;
 use BlueFission\Str;
 use BlueFission\System\System;
 use BlueFission\Val;
@@ -24,6 +27,8 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 {
     private $_loader;
     protected $_model;
+    private array $_loadedAddOns = [];
+    private array $_registeredAddOns = [];
 
     public function __construct(MySQLLink $link)
     {
@@ -170,28 +175,46 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 
     public function activateAll(): array
     {
+        return $this->updateAllActivation(true);
+    }
+
+    public function deactivateAll(): array
+    {
+        return $this->updateAllActivation(false);
+    }
+
+    private function updateAllActivation(bool $active): array
+    {
         $addOns = $this->installedAddOns();
-        $results = [];
+        $results = Arr::make([]);
+        $action = $active ? 'activate' : 'deactivate';
+
         foreach ($addOns as $addOn) {
             $record = Arr::make($addOn);
-            if (Flag::parseBool($record->get('is_active'))) {
+            if (Flag::parseBool($record->get('is_active')) === $active) {
                 continue;
             }
 
             $addOnId = $record->get('addon_id');
             if (Val::isEmpty($addOnId)) {
-                $results[] = $this->failedLifecycleResult(
-                    'activate',
+                $failure = $this->failedLifecycleResult(
+                    $action,
                     '',
                     new \UnexpectedValueException('Persisted add-on row is missing addon_id.')
                 );
+                $failure['record'] = $record->toArray();
+                $results->push($failure);
                 continue;
             }
 
-            $results[] = $this->activate($addOnId);
+            $result = $active
+                ? $this->activate($addOnId)
+                : $this->deactivate($addOnId);
+            $result['record'] = $record->toArray();
+            $results->push($result);
         }
 
-        return $this->lifecycleBatchResult('activate_all', $results);
+        return $this->lifecycleBatchResult("{$action}_all", $results->toArray());
     }
 
     public function deactivate($addOnId): array
@@ -266,15 +289,63 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
         return $list;
     }
 
-    public function loadActivatedAddOns()
+    public function loadActivatedAddOns(
+        ?Application $application = null,
+        ?RegistrationPlan $plan = null
+    ): array
     {
+        if (($application === null) !== ($plan === null)) {
+            throw new \InvalidArgumentException(
+                'Application and registration plan must be provided together.'
+            );
+        }
+
         $addOns = $this->_model->getActivatedAddOns();
         $results = Arr::make([]);
 
         foreach ($addOns as $addOn) {
             $object = new AddOn;
             $object->assign($addOn);
-            $results->push($this->loadAddOn($object));
+            $load = $this->loadAddOn($object);
+
+            if (Flag::isFalse($load['ok']) || !Func::isCallable($load['value'] ?? null)) {
+                $load['registration'] = $this->registrationResult(
+                    Flag::isFalse($load['ok']) ? 'load_failed' : 'not_applicable'
+                );
+                $results->push($load);
+                continue;
+            }
+
+            if ($application === null || $plan === null) {
+                $load['registration'] = $this->registrationResult('pending');
+                $results->push($load);
+                continue;
+            }
+
+            $key = $this->addOnRuntimeKey($object, $load['path']);
+            if (Arr::hasKey($this->_registeredAddOns, $key)) {
+                $load['registration'] = $this->registrationResult('already_registered');
+                $results->push($load);
+                continue;
+            }
+
+            try {
+                Func::make($load['value'])->call($application, $plan);
+                $this->_registeredAddOns[$key] = true;
+                $load['registration'] = $this->registrationResult('registered', true);
+            } catch (\Throwable $exception) {
+                $load['ok'] = false;
+                $load['stage'] = 'registration';
+                $load['error'] = $exception->getMessage();
+                $load['exception'] = $exception::class;
+                $load['registration'] = $this->registrationResult(
+                    'failed',
+                    false,
+                    $exception
+                );
+            }
+
+            $results->push($load);
         }
 
         return $results->toArray();
@@ -287,10 +358,45 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             return $resolution;
         }
 
+        $key = $this->addOnRuntimeKey($addOn, $resolution['path']);
+        if (Arr::hasKey($this->_loadedAddOns, $key)) {
+            $loaded = $this->_loadedAddOns[$key];
+            $loaded['status'] = 'already_loaded';
+            $loaded['changed'] = false;
+
+            return $loaded;
+        }
+
         $resolution['value'] = require_once($resolution['path']);
         $resolution['status'] = 'loaded';
+        $resolution['stage'] = 'load';
+        $resolution['changed'] = true;
+        $this->_loadedAddOns[$key] = $resolution;
 
         return $resolution;
+    }
+
+    private function addOnRuntimeKey(AddOn $addOn, string $primaryFile): string
+    {
+        $identifier = Val::isNotEmpty($addOn->addon_id)
+            ? (string)$addOn->addon_id
+            : (string)$addOn->name;
+
+        return Str::lower(Str::trim($identifier)) . ':' . Path::normalize($primaryFile);
+    }
+
+    private function registrationResult(
+        string $status,
+        bool $executed = false,
+        ?\Throwable $exception = null
+    ): array {
+        return Arr::make([
+            'ok' => $exception === null && $status !== 'load_failed',
+            'status' => $status,
+            'executed' => $executed,
+            'error' => $exception?->getMessage(),
+            'exception' => $exception === null ? null : $exception::class,
+        ])->toArray();
     }
 
     protected function callHook(AddOn $addOn, $hook)
@@ -667,11 +773,41 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
     {
         $this->_model->clear();
         $this->_model->read();
+        $records = $this->_model->all();
 
-        return Arr::make(Arr::toArray($this->_model->all(), true))
-            ->map(fn ($addOn) => Arr::toArray($addOn, true))
+        if ($records instanceof ICollection) {
+            $records = $records->toArray(true);
+        } elseif ($records instanceof \Traversable) {
+            $records = iterator_to_array($records);
+        } else {
+            $records = Arr::toArray($records, true);
+        }
+
+        return Arr::make($records)
+            ->map(fn ($addOn) => $this->normalizeInstalledAddOn($addOn))
             ->values()
             ->toArray();
+    }
+
+    private function normalizeInstalledAddOn(mixed $addOn): array
+    {
+        if (Arr::is($addOn)) {
+            return $addOn;
+        }
+
+        if ($addOn instanceof ICollection) {
+            return $addOn->toArray(true);
+        }
+
+        if (Func::isCallable([$addOn, 'data'])) {
+            return Arr::toArray(Func::make([$addOn, 'data'])->call(), true);
+        }
+
+        if (is_object($addOn)) {
+            return get_object_vars($addOn);
+        }
+
+        return [];
     }
 
     protected function datasourceManager(): mixed
