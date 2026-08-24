@@ -4,6 +4,10 @@ namespace BlueFission\Tests\BlueCore\Business\Managers;
 
 use BlueFission\BlueCore\Business\Managers\AddOnManager;
 use BlueFission\BlueCore\Domain\AddOn\AddOn;
+use BlueFission\BlueCore\Registration\RegistrationPlan;
+use BlueFission\Collections\Collection;
+use BlueFission\Collections\Group;
+use BlueFission\Services\Application;
 use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -32,6 +36,11 @@ class AddOnManagerTest extends TestCase
 
     protected function setUp(): void
     {
+        unset(
+            $GLOBALS['bluecore_registration_factory_calls'],
+            $GLOBALS['bluecore_inactive_primary_loads']
+        );
+
         if (self::$ownsRoot) {
             $this->removeDir(self::$root);
         }
@@ -379,6 +388,119 @@ class AddOnManagerTest extends TestCase
         $this->assertContains('portable', $GLOBALS['bluecore_hook_calls']);
     }
 
+    public function testActiveRegistrationFactoryExecutesOnceAfterBaselinePlanIsAvailable(): void
+    {
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'factory';
+        File::ensureFile(
+            $path . DIRECTORY_SEPARATOR . 'main.php',
+            <<<'PHP'
+<?php
+
+return static function (\BlueFission\Services\Application $application, \BlueFission\BlueCore\Registration\RegistrationPlan $plan): void {
+    $GLOBALS['bluecore_registration_factory_calls'] =
+        ($GLOBALS['bluecore_registration_factory_calls'] ?? 0) + 1;
+    $plan->service('factory.service', $application->name());
+};
+PHP,
+            true
+        );
+        $model = new FakeAddOnModel([
+            [
+                'addon_id' => 21,
+                'name' => 'factory',
+                'path' => $path,
+                'primary_file' => 'main.php',
+                'is_active' => 1,
+            ],
+        ]);
+        $manager = new TestableAddOnManager($model);
+        $application = new Application(['name' => 'registration-factory-test']);
+        $plan = (new RegistrationPlan())->service('baseline', 'ready');
+
+        $first = $manager->loadActivatedAddOns($application, $plan);
+        $second = $manager->loadActivatedAddOns($application, $plan);
+
+        $this->assertTrue($first[0]['ok']);
+        $this->assertSame('registered', $first[0]['registration']['status']);
+        $this->assertTrue($first[0]['registration']['executed']);
+        $this->assertSame('already_registered', $second[0]['registration']['status']);
+        $this->assertFalse($second[0]['registration']['executed']);
+        $this->assertSame(1, $GLOBALS['bluecore_registration_factory_calls']);
+        $this->assertSame('ready', $plan->entries('services')['baseline']);
+        $this->assertSame('registration-factory-test', $plan->entries('services')['factory.service']);
+    }
+
+    public function testInactiveAndLegacyAddOnsDoNotExecuteRegistrationFactories(): void
+    {
+        $activePath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'legacyload';
+        $inactivePath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'inactive';
+        File::ensureFile($activePath . DIRECTORY_SEPARATOR . 'main.php', '<?php return null;', true);
+        File::ensureFile(
+            $inactivePath . DIRECTORY_SEPARATOR . 'main.php',
+            "<?php \$GLOBALS['bluecore_inactive_primary_loads'] = true; return static function (): void {};",
+            true
+        );
+        $manager = new TestableAddOnManager(new FakeAddOnModel([
+            [
+                'addon_id' => 22,
+                'name' => 'legacyload',
+                'path' => $activePath,
+                'primary_file' => 'main.php',
+                'is_active' => 1,
+            ],
+            [
+                'addon_id' => 23,
+                'name' => 'inactive',
+                'path' => $inactivePath,
+                'primary_file' => 'main.php',
+                'is_active' => 0,
+            ],
+        ]));
+
+        $results = $manager->loadActivatedAddOns(
+            new Application(['name' => 'legacy-registration-test']),
+            new RegistrationPlan()
+        );
+
+        $this->assertCount(1, $results);
+        $this->assertTrue($results[0]['ok']);
+        $this->assertSame('not_applicable', $results[0]['registration']['status']);
+        $this->assertArrayNotHasKey('bluecore_inactive_primary_loads', $GLOBALS);
+    }
+
+    public function testRegistrationFactoryFailureKeepsOriginalDiagnosticsAndCanRetry(): void
+    {
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'failingfactory';
+        File::ensureFile(
+            $path . DIRECTORY_SEPARATOR . 'main.php',
+            '<?php return static function (): void { throw new \\DomainException("factory failed"); };',
+            true
+        );
+        $manager = new TestableAddOnManager(new FakeAddOnModel([
+            [
+                'addon_id' => 24,
+                'name' => 'failingfactory',
+                'path' => $path,
+                'primary_file' => 'main.php',
+                'is_active' => 1,
+            ],
+        ]));
+        $application = new Application(['name' => 'failing-registration-test']);
+        $plan = new RegistrationPlan();
+
+        $first = $manager->loadActivatedAddOns($application, $plan);
+        $second = $manager->loadActivatedAddOns($application, $plan);
+
+        foreach ([$first[0], $second[0]] as $result) {
+            $this->assertFalse($result['ok']);
+            $this->assertSame('registration', $result['stage']);
+            $this->assertSame('failed', $result['registration']['status']);
+            $this->assertSame('factory failed', $result['error']);
+            $this->assertSame(\DomainException::class, $result['exception']);
+            $this->assertSame(Path::normalize($path . DIRECTORY_SEPARATOR . 'main.php'), $result['path']);
+        }
+    }
+
     public function testActivateAndActivateAllReturnStructuredStatuses(): void
     {
         $model = new FakeAddOnModel([
@@ -421,6 +543,72 @@ class AddOnManagerTest extends TestCase
         $this->assertSame('registration', $result['results'][0]['stage']);
         $this->assertSame('failed', $result['results'][1]['stage']);
         $this->assertSame('Persisted add-on row is missing addon_id.', $result['results'][1]['error']);
+    }
+
+    #[DataProvider('collectionContainerProvider')]
+    public function testBulkLifecyclePreservesCollectionRowsAndNamespaceRoundTrips(string $container): void
+    {
+        $namespace = 'BlueFission\\Fixtures\\InstalledAddOn';
+        $records = [
+            [
+                'addon_id' => 31,
+                'name' => 'first',
+                'namespace' => $namespace,
+                'path' => '/addons/first',
+                'primary_file' => 'main.php',
+                'is_active' => 0,
+            ],
+            [
+                'addon_id' => 32,
+                'name' => 'second',
+                'namespace' => 'BlueFission\\Fixtures\\SecondAddOn',
+                'path' => '/addons/second',
+                'primary_file' => 'bootstrap.php',
+                'is_active' => 0,
+            ],
+        ];
+        $model = new FakeAddOnModel($records, containerClass: $container);
+        $manager = new TestableAddOnManager($model);
+
+        $activated = $manager->activateAll();
+        $deactivated = $manager->deactivateAll();
+
+        $this->assertTrue($activated['ok']);
+        $this->assertSame(2, $activated['total']);
+        $this->assertSame($records[0], $activated['results'][0]['record']);
+        $this->assertSame($namespace, $activated['results'][0]['record']['namespace']);
+        $this->assertTrue($deactivated['ok']);
+        $this->assertSame(2, $deactivated['total']);
+        $this->assertSame($namespace, $model->records[0]['namespace']);
+        $this->assertSame([1, 1, 0, 0], array_column($model->writes, 'is_active'));
+    }
+
+    public static function collectionContainerProvider(): array
+    {
+        return [
+            'collection' => [Collection::class],
+            'group' => [Group::class],
+        ];
+    }
+
+    public function testDeactivateAllFailsClosedForMalformedRowsAndWriteFailures(): void
+    {
+        $model = new FakeAddOnModel([
+            ['addon_id' => 41, 'name' => 'failed', 'is_active' => 1],
+            ['name' => 'malformed', 'is_active' => 1],
+        ], containerClass: Group::class, failWritesForIds: [41]);
+        $manager = new TestableAddOnManager($model);
+
+        $result = $manager->deactivateAll();
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('deactivate_all', $result['action']);
+        $this->assertSame(2, $result['total']);
+        $this->assertSame(0, $result['succeeded']);
+        $this->assertSame(2, $result['failed']);
+        $this->assertSame('registration', $result['results'][0]['stage']);
+        $this->assertSame('failed', $result['results'][1]['stage']);
+        $this->assertSame('malformed', $result['results'][1]['record']['name']);
     }
 
     public function testRepeatedInstallUsesSupportedModelOperationsAndDoesNotDuplicateRegistration(): void
@@ -671,6 +859,7 @@ class FakeAddOnModel
     public function __construct(
         array $addons = [],
         private bool $returnArrays = false,
+        private ?string $containerClass = null,
         private array $failWritesForIds = []
     )
     {
@@ -745,13 +934,23 @@ class FakeAddOnModel
         return $this->current;
     }
 
-    public function all(): array
+    public function all(): mixed
     {
-        if ($this->returnArrays) {
-            return $this->records;
-        }
+        $records = $this->returnArrays
+            ? $this->records
+            : array_map(static fn($record) => (object)$record, $this->records);
 
-        return array_map(static fn($record) => (object)$record, $this->records);
+        return $this->containerClass === null
+            ? $records
+            : new $this->containerClass($records);
+    }
+
+    public function getActivatedAddOns(): array
+    {
+        return array_values(array_filter(
+            $this->records,
+            static fn ($record) => (int)($record['is_active'] ?? 0) === 1
+        ));
     }
 
     public function delete($values): void
