@@ -28,12 +28,42 @@ results or validate domain-specific schemas.
 Add-on lifecycle managers implement `IAddOnLifecycleManager`:
 
 - `install($name, bool $installDependencies = false): array`
+- `installAll(bool $installDependencies = false): array`
 - `uninstall($addOnId, bool $removeDependencies = false): array`
 - `activate($addOnId): array`
+- `activateAll(): array`
 - `deactivate($addOnId): array`
+- `migrate($addOnId): array`
+- `deactivateAll(): array`
 - `loadActivatedAddOns(?Application $application = null, ?RegistrationPlan $plan = null): array`
 
 Lifecycle methods return structured arrays so callers can compose results, log decisions, and avoid process termination.
+
+Install and uninstall hooks are optional. When a reachable primary file has no
+compatible hook callable, the hook result is `ok=true`, `status=skipped`, and
+`optional=true`. A missing or unsafe configured primary file remains blocking, as
+does an exception thrown by a discovered hook. Blocking hook failures stop before
+registration state is written or removed and retain structured retry diagnostics.
+
+Datasource migration and population are reported as distinct result blocks. Population
+stops on the first material generator failure, identifies completed and failed
+generators, and uses `review_population_failure` as its next action because BlueCore
+cannot guarantee that an arbitrary generator is retry-idempotent. Installation does
+not continue to hooks or registration writes after such a failure.
+
+`migrate()` refreshes the datasource structure of an already-installed add-on
+without installing dependencies or populating data. Migration history is
+filtered by the add-on batch before pending deltas are discovered. Successful
+deltas are idempotent on repeat; failed deltas stop the batch, retain their
+exception diagnostics, and report `retry_migrate` without marking the
+lifecycle operation complete.
+
+Bulk lifecycle operations normalize DevElation `Collection` and `Group`
+containers through the collection API before processing their rows. Each result
+retains the exact persisted row used for the operation, including identifiers,
+namespace separators, paths, primary files, and activation state. A malformed
+row or failed storage write makes the aggregate result fail while preserving
+the per-row diagnostic and leaving other rows visible to the caller.
 
 An active add-on primary file may return a callable registration factory. When
 the application and baseline registration plan are supplied together, BlueCore
