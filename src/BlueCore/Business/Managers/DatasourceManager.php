@@ -6,15 +6,18 @@ use BlueFission\Collections\Collection;
 use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\Data\Storage\Storage;
 use BlueFission\Utils\File;
+use BlueFission\Utils\Path;
 use BlueFission\Arr;
+use BlueFission\Flag;
+use BlueFission\Func;
 use BlueFission\Str;
 use BlueFission\Val;
 
 class DatasourceManager extends Service {
 
-	private $_deltaDir = '';
-	private $_generatorDir = '';
-	private $_db = null;
+	protected $_deltaDir = '';
+	protected $_generatorDir = '';
+	protected $_db = null;
 
 	public function __construct( MySQLLink $link, Storage $storage )
     {
@@ -37,63 +40,124 @@ class DatasourceManager extends Service {
 		$this->_generatorDir = $directory;
 	}
 
-	public function runMigrations($batch = null)
+	public function runMigrations($batch = null): array
 	{
-		$batch = $batch ?: 'opus';
+		$batch = Val::isEmpty($batch) ? 'opus' : Str::trim((string)$batch);
+		$result = Arr::make([
+			'ok' => true,
+			'batch' => $batch,
+			'changed' => false,
+			'stage' => 'discovery',
+			'total' => 0,
+			'applied' => 0,
+			'failed' => 0,
+			'results' => [],
+			'nextAction' => null,
+			'error' => null,
+		]);
 
-		if ( !file_exists($this->_deltaDir) ) {
-			return;
+		if (Flag::isFalse($this->deltaDirectoryExists())) {
+			$result->set('stage', 'complete');
+
+			return $result->toArray();
 		}
 
 		$deltas = $this->loadDeltas();
 		$iteration = 0;
-		$storedDeltas = $this->getDeltasFromDB($iteration);
+		$storedDeltas = $this->getDeltasFromDB($iteration, $batch);
 		$iteration++;
 
 		$deltas = Arr::make($deltas)
 			->diff($storedDeltas)
+			->filter(fn ($delta) => Str::pos((string)$delta, '.') !== 0)
 			->values()
 			->toArray();
 
-		$dbActive = false;
-		if ( MySQLLink::tableExists('migrations') ) {
-			$dbActive = true;
-		}
+		$result->set('total', Arr::size($deltas));
+		$result->set('stage', 'migration');
+		$dbActive = $this->migrationTableExists();
+		$migrations = Arr::make([]);
 
-		foreach ( $deltas as $delta ) {
-			$classname = '';
-			if ( strpos($delta, '.') != 0 ) {
-				$classname = $this->findClassName( $this->_deltaDir . $delta );
-				if ( $classname ) {
-					include_once($this->_deltaDir . $delta);
-					$this->_db->clear();
-					$this->_db->assign([
-						'name' => $delta,
-						'batch' => $batch,
-						'iteration' => $iteration,
-						'status' => 1
-					])->write();
-					$this->_db->id($this->_db->lastRow());
-					$status = 2;
-					$object = \App::makeInstance($classname);
-					try {
-						call_user_func([$object, 'change']);
-					} catch ( \Exception $e ) {
-						$status = 3;
-					}
-					if ( !$dbActive ) {
-						$this->_db->activate();
-						$dbActive = true;
-					}
-					$this->_db->assign([
-						'name' => $delta,
-						'batch' => $batch,
-						'iteration' => $iteration,
-						'status' => $status
-					])->write();
-				}
+		foreach ($deltas as $delta) {
+			$migration = Arr::make([
+				'ok' => false,
+				'name' => $delta,
+				'batch' => $batch,
+				'iteration' => $iteration,
+				'status' => 'pending',
+				'error' => null,
+				'exception' => null,
+			]);
+			$classname = $this->findClassName($this->_deltaDir . $delta);
+
+			if (Val::isEmpty($classname)) {
+				$migration->set('status', 'missing_class');
+				$migration->set('error', 'Migration class could not be resolved.');
+				$migrations->push($migration->toArray());
+				break;
+			}
+
+			$this->includeMigration($this->_deltaDir . $delta);
+			$this->_db->clear();
+			$this->_db->assign([
+				'name' => $delta,
+				'batch' => $batch,
+				'iteration' => $iteration,
+				'status' => 1,
+			])->write();
+			$this->_db->id($this->_db->lastRow());
+			$status = 2;
+
+			try {
+				$object = $this->migrationInstance($classname);
+				Func::make([$object, 'change'])->call();
+				$migration->set('ok', true);
+				$migration->set('status', 'applied');
+			} catch (\Throwable $exception) {
+				$status = 3;
+				$migration->set('status', 'failed');
+				$migration->set('error', $exception->getMessage());
+				$migration->set('exception', $exception::class);
+			}
+
+			if (Flag::isFalse($dbActive)) {
+				$this->_db->activate();
+				$dbActive = true;
+			}
+
+			$this->_db->assign([
+				'name' => $delta,
+				'batch' => $batch,
+				'iteration' => $iteration,
+				'status' => $status,
+			])->write();
+			$migrations->push($migration->toArray());
+
+			if (Flag::isFalse($migration->get('ok'))) {
+				break;
 			}
 		}
+
+		$failures = $migrations
+			->filter(fn ($migration) => Flag::isFalse(Arr::getPath($migration, 'ok', false)))
+			->values();
+		$applied = $migrations
+			->filter(fn ($migration) => Flag::parseBool(Arr::getPath($migration, 'ok', false)))
+			->values();
+		$result->set('results', $migrations->toArray());
+		$result->set('applied', $applied->count());
+		$result->set('failed', $failures->count());
+		$result->set('changed', Arr::isNotEmpty($applied->toArray()));
+		$result->set('ok', Arr::isEmpty($failures->toArray()));
+		$result->set('stage', Arr::isEmpty($failures->toArray()) ? 'complete' : 'migration');
+
+		if (Arr::isNotEmpty($failures->toArray())) {
+			$failure = Arr::getPath($failures->values()->toArray(), '0', []);
+			$result->set('nextAction', 'retry_migrations');
+			$result->set('error', Arr::getPath($failure, 'error', 'Migration failed.'));
+		}
+
+		return $result->toArray();
 	}
 
 	public function revertMigrations()
@@ -169,43 +233,143 @@ class DatasourceManager extends Service {
 		}
 	}
 
-	public function populate( $auto = false )
+	public function populate($auto = false): array
 	{
-		if (!file_exists($this->_generatorDir)) {
-			return;
+		$result = Arr::make([
+			'ok' => true,
+			'changed' => false,
+			'stage' => 'discovery',
+			'total' => 0,
+			'populated' => 0,
+			'failed' => 0,
+			'results' => [],
+			'nextAction' => null,
+			'error' => null,
+		]);
+
+		if (Flag::isFalse($this->generatorDirectoryExists())) {
+			$result->set('stage', 'complete');
+
+			return $result->toArray();
 		}
 
-		$generators = $this->loadGenerators();
-		if ( Arr::has($generators, 'RootSeeder.php', true) ) {
-			$classname = $this->findClassName( $this->_generatorDir . 'RootSeeder.php' );
-			if ( $classname ) {
-				include_once($this->_generatorDir . 'RootSeeder.php');
-				$object = \App::makeInstance($classname);
-				if ( method_exists($object, 'seeders') ) {
-					$generators = Arr::make(call_user_func([$object, 'seeders']))
-						->map(fn ($generator) => Str::endsWith($generator, '.php') ? $generator : $generator . '.php')
-						->toArray();
+		try {
+			$generators = $this->orderedGenerators($this->loadGenerators());
+		} catch (\Throwable $exception) {
+			return $this->failedPopulationResult($result, 'RootSeeder.php', $exception);
+		}
+
+		$result->set('total', Arr::size($generators));
+		$result->set('stage', 'population');
+		$outcomes = Arr::make([]);
+
+		foreach ($generators as $generator) {
+			$outcome = Arr::make([
+				'ok' => false,
+				'name' => $generator,
+				'status' => 'pending',
+				'error' => null,
+				'exception' => null,
+			]);
+
+			try {
+				$classname = $this->findClassName($this->_generatorDir . $generator);
+				if (Val::isEmpty($classname)) {
+					throw new \RuntimeException('Population class could not be resolved.');
 				}
+
+				$this->includeGenerator($this->_generatorDir . $generator);
+				$object = $this->generatorInstance($classname);
+				if (Flag::isFalse(Func::isCallable([$object, 'populate']))) {
+					throw new \RuntimeException('Population class must expose populate().');
+				}
+
+				Func::make([$object, 'populate'])->call($auto);
+				$outcome->set('ok', true);
+				$outcome->set('status', 'populated');
+			} catch (\Throwable $exception) {
+				$outcome->set('status', 'failed');
+				$outcome->set('error', $exception->getMessage());
+				$outcome->set('exception', $exception::class);
+			}
+
+			$outcomes->push($outcome->toArray());
+			if (Flag::isFalse($outcome->get('ok'))) {
+				break;
 			}
 		}
 
-		foreach ( $generators as $generator ) {
-			$classname = '';
+		$failures = $outcomes
+			->filter(fn ($outcome) => Flag::isFalse(Arr::getPath($outcome, 'ok', false)))
+			->values();
+		$populated = $outcomes
+			->filter(fn ($outcome) => Flag::parseBool(Arr::getPath($outcome, 'ok', false)))
+			->values();
+		$result->set('results', $outcomes->toArray());
+		$result->set('populated', $populated->count());
+		$result->set('failed', $failures->count());
+		$result->set('changed', Arr::isNotEmpty($populated->toArray()));
+		$result->set('ok', Arr::isEmpty($failures->toArray()));
+		$result->set('stage', Arr::isEmpty($failures->toArray()) ? 'complete' : 'population');
 
-			if ( strpos($generator, '.') !== 0 ) {
-				$generator = Str::endsWith($generator, '.php') ? $generator : $generator . '.php';
-				
-				$classname = $this->findClassName( $this->_generatorDir . $generator );
-				if ( $classname ) {
-					include_once($this->_generatorDir . $generator);
-					$object = \App::makeInstance($classname);
-					call_user_func([$object, 'populate'], $auto);
-				}
-			}
+		if (Arr::isNotEmpty($failures->toArray())) {
+			$failure = Arr::getPath($failures->toArray(), '0', []);
+			$result->set('nextAction', 'review_population_failure');
+			$result->set('error', Arr::getPath($failure, 'error', 'Datasource population failed.'));
 		}
+
+		return $result->toArray();
 	}
 
-	private function getDeltasFromDB( &$iteration ): array
+	protected function orderedGenerators(array $generators): array
+	{
+		$generators = Arr::make($generators)
+			->filter(fn ($generator) => Str::pos((string)$generator, '.') !== 0)
+			->map(fn ($generator) => Str::endsWith((string)$generator, '.php') ? $generator : $generator . '.php')
+			->values()
+			->toArray();
+
+		if (Flag::isFalse(Arr::has($generators, 'RootSeeder.php', true))) {
+			return $generators;
+		}
+
+		$classname = $this->findClassName($this->_generatorDir . 'RootSeeder.php');
+		if (Val::isEmpty($classname)) {
+			throw new \RuntimeException('Root seeder class could not be resolved.');
+		}
+
+		$this->includeGenerator($this->_generatorDir . 'RootSeeder.php');
+		$object = $this->generatorInstance($classname);
+		if (Flag::isFalse(Func::isCallable([$object, 'seeders']))) {
+			return $generators;
+		}
+
+		return Arr::make(Func::make([$object, 'seeders'])->call())
+			->map(fn ($generator) => Str::endsWith((string)$generator, '.php') ? $generator : $generator . '.php')
+			->values()
+			->toArray();
+	}
+
+	private function failedPopulationResult(Arr $result, string $generator, \Throwable $exception): array
+	{
+		$result->set('ok', false);
+		$result->set('stage', 'population');
+		$result->set('total', 1);
+		$result->set('failed', 1);
+		$result->set('nextAction', 'review_population_failure');
+		$result->set('error', $exception->getMessage());
+		$result->set('results', [[
+			'ok' => false,
+			'name' => $generator,
+			'status' => 'failed',
+			'error' => $exception->getMessage(),
+			'exception' => $exception::class,
+		]]);
+
+		return $result->toArray();
+	}
+
+	protected function getDeltasFromDB(&$iteration, ?string $batch = null): array
 	{
 		if ( !MySQLLink::tableExists('migrations') ) {
 			return [];
@@ -213,6 +377,9 @@ class DatasourceManager extends Service {
 
 		$this->_db->activate();
 		$this->_db->clear();
+		if (Val::isNotEmpty($batch)) {
+			$this->_db->where('batch', $batch);
+		}
 		$this->_db->order('iteration', 'DESC')
 			->order('migration_id', 'DESC')
 			->read();
@@ -260,14 +427,49 @@ class DatasourceManager extends Service {
 		return $default;
 	}
 
-	private function loadGenerators()
+	protected function loadGenerators(): array
 	{
 		return scandir($this->_generatorDir);
 	}
 
-	private function loadDeltas( $reverse = SCANDIR_SORT_ASCENDING )
+	protected function generatorDirectoryExists(): bool
+	{
+		return Flag::parseBool(Arr::getPath(Path::readiness($this->_generatorDir), 'exists', false));
+	}
+
+	protected function includeGenerator(string $path): void
+	{
+		include_once($path);
+	}
+
+	protected function generatorInstance(string $classname): object
+	{
+		return \App::makeInstance($classname);
+	}
+
+	protected function loadDeltas( $reverse = SCANDIR_SORT_ASCENDING )
 	{
 		return scandir($this->_deltaDir, $reverse);
+	}
+
+	protected function deltaDirectoryExists(): bool
+	{
+		return Flag::parseBool(Arr::getPath(Path::readiness($this->_deltaDir), 'exists', false));
+	}
+
+	protected function migrationTableExists(): bool
+	{
+		return MySQLLink::tableExists('migrations');
+	}
+
+	protected function includeMigration(string $path): void
+	{
+		include_once($path);
+	}
+
+	protected function migrationInstance(string $classname): object
+	{
+		return \App::makeInstance($classname);
 	}
 
 	protected function findClassName($file): ?string

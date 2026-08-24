@@ -45,6 +45,7 @@ final class ComposerMetadataTest extends TestCase
         $this->assertSame(self::PACKAGE_REPOSITORY . '/issues', $composer['support']['issues']);
         $this->assertSame(self::PACKAGE_REPOSITORY, $composer['support']['source']);
         $this->assertTrue($composer['config']['platform-check']);
+        $this->assertTrue($composer['extra']['plugin-modifies-install-path']);
     }
 
     public function testReleaseUsesCurrentDevElationConstraint(): void
@@ -114,5 +115,8 @@ final class ComposerMetadataTest extends TestCase
 
         $this->assertTrue($workflow->has("'8.2'"));
         $this->assertTrue($workflow->has("'8.3'"));
+        $this->assertTrue($workflow->has("composer-version: '2.2'"));
+        $this->assertTrue($workflow->has("composer-version: 'latest'"));
+        $this->assertTrue($workflow->has('tools: composer:${{ matrix.composer-version }}'));
     }
 }

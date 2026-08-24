@@ -4,11 +4,16 @@ namespace BlueFission\BlueCore\Business\Managers;
 
 use BlueFission\Arr;
 use BlueFission\Connections\Database\MySQLLink;
+use BlueFission\Collections\ICollection;
+use BlueFission\BlueCore\Contracts\IAddOnLifecycleManager;
 use BlueFission\Data\FileSystem;
 use BlueFission\Data\Storage\Storage;
 use BlueFission\Func;
 use BlueFission\Net\HTTP;
 use BlueFission\Flag;
+use BlueFission\Security\Hash;
+use BlueFission\BlueCore\Registration\RegistrationPlan;
+use BlueFission\Services\Application;
 use BlueFission\Services\Service;
 use BlueFission\Utils\Loader;
 use BlueFission\Utils\File;
@@ -19,10 +24,12 @@ use BlueFission\Str;
 use BlueFission\System\System;
 use BlueFission\Val;
 
-class AddOnManager extends Service
+class AddOnManager extends Service implements IAddOnLifecycleManager
 {
     private $_loader;
     protected $_model;
+    private array $_loadedAddOns = [];
+    private array $_registeredAddOns = [];
 
     public function __construct(MySQLLink $link)
     {
@@ -63,19 +70,49 @@ class AddOnManager extends Service
         $addon->assign($data);
         $addon->path = $addOnPath;
 
+        $hookPreflight = $this->resolvePrimaryFile($addon);
+        if (Flag::isFalse($hookPreflight['ok'])) {
+            $hookResult = $this->callHook($addon, 'install');
+            $result['hooks'][] = $hookResult;
+
+            return $this->withHookFailure($result, $hookResult, 'install');
+        }
+
         $datasource = $this->datasourceManager();
         $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
         $datasource->setGeneratorDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR);
-        ob_start();
-        $datasource->runMigrations($name);
-        $datasource->populate();
-        $result['messages'][] = ob_get_contents();
-        ob_end_clean();
+        $migrationResult = $datasource->runMigrations($data->name);
+        $result['migrations'] = $migrationResult;
+        if (Flag::isFalse(Arr::getPath($migrationResult, 'ok', false))) {
+            $result['ok'] = false;
+            $result['stage'] = 'datasource';
+            $result['nextAction'] = 'retry_install';
+            $result['error'] = Arr::getPath($migrationResult, 'error', 'Add-on migration failed.');
+            $result['messages'][] = $result['error'];
+
+            return $result;
+        }
+
+		$populationResult = $datasource->populate();
+		$result['population'] = $populationResult;
+		if (Flag::isFalse(Arr::getPath($populationResult, 'ok', false))) {
+			$result['ok'] = false;
+			$result['stage'] = 'datasource';
+			$result['nextAction'] = 'review_population_failure';
+			$result['error'] = Arr::getPath($populationResult, 'error', 'Add-on population failed.');
+			$result['messages'][] = $result['error'];
+
+			return $result;
+		}
 
         $hookResult = $this->callHook($addon, 'install');
         if (Arr::is($hookResult)) {
             $result['hooks'][] = $hookResult;
         }
+        if (Flag::isFalse(Arr::getPath($hookResult, 'ok', false))) {
+            return $this->withHookFailure($result, $hookResult, 'install');
+        }
+
         $this->_model->write($addon);
         $result['changed'] = true;
         $result['stage'] = 'complete';
@@ -110,6 +147,9 @@ class AddOnManager extends Service
             $hookResult = $this->callHook($addon, 'uninstall');
             if (Arr::is($hookResult)) {
                 $result['hooks'][] = $hookResult;
+            }
+            if (Flag::isFalse(Arr::getPath($hookResult, 'ok', false))) {
+                return $this->withHookFailure($result, $hookResult, 'uninstall');
             }
 
             $result['stage'] = 'definition';
@@ -161,28 +201,46 @@ class AddOnManager extends Service
 
     public function activateAll(): array
     {
+        return $this->updateAllActivation(true);
+    }
+
+    public function deactivateAll(): array
+    {
+        return $this->updateAllActivation(false);
+    }
+
+    private function updateAllActivation(bool $active): array
+    {
         $addOns = $this->installedAddOns();
-        $results = [];
+        $results = Arr::make([]);
+        $action = $active ? 'activate' : 'deactivate';
+
         foreach ($addOns as $addOn) {
             $record = Arr::make($addOn);
-            if (Flag::parseBool($record->get('is_active'))) {
+            if (Flag::parseBool($record->get('is_active')) === $active) {
                 continue;
             }
 
             $addOnId = $record->get('addon_id');
             if (Val::isEmpty($addOnId)) {
-                $results[] = $this->failedLifecycleResult(
-                    'activate',
+                $failure = $this->failedLifecycleResult(
+                    $action,
                     '',
                     new \UnexpectedValueException('Persisted add-on row is missing addon_id.')
                 );
+                $failure['record'] = $record->toArray();
+                $results->push($failure);
                 continue;
             }
 
-            $results[] = $this->activate($addOnId);
+            $result = $active
+                ? $this->activate($addOnId)
+                : $this->deactivate($addOnId);
+            $result['record'] = $record->toArray();
+            $results->push($result);
         }
 
-        return $this->lifecycleBatchResult('activate_all', $results);
+        return $this->lifecycleBatchResult("{$action}_all", $results->toArray());
     }
 
     public function deactivate($addOnId): array
@@ -190,6 +248,40 @@ class AddOnManager extends Service
         $this->_model->write(['addon_id' => $addOnId, 'is_active' => 0]);
 
         return $this->lifecycleResult('deactivate', (string)$addOnId, $this->_model->status(), $this->_model->query());
+    }
+
+    public function migrate($addOnId): array
+    {
+        $addOn = $this->getAddOnById($addOnId);
+        $result = $this->lifecycleResult('migrate', (string)$addOn->name);
+        $result['stage'] = 'datasource';
+
+        try {
+            $datasource = $this->datasourceManager();
+            $datasource->setDeltaDirectory(
+                $addOn->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR
+            );
+            $datasource->setGeneratorDirectory(
+                $addOn->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR
+            );
+            $migrationResult = $datasource->runMigrations($addOn->name);
+            $result['migrations'] = $migrationResult;
+            $result['ok'] = Flag::parseBool(Arr::getPath($migrationResult, 'ok', false));
+            $result['changed'] = Flag::parseBool(Arr::getPath($migrationResult, 'changed', false));
+            $result['stage'] = $result['ok'] ? 'complete' : 'datasource';
+            $result['nextAction'] = $result['ok'] ? null : 'retry_migrate';
+            $result['error'] = Arr::getPath($migrationResult, 'error');
+            if (Val::isNotEmpty($result['error'])) {
+                $result['messages'][] = $result['error'];
+            }
+        } catch (\Throwable $exception) {
+            $result['ok'] = false;
+            $result['nextAction'] = 'retry_migrate';
+            $result['error'] = $exception->getMessage();
+            $result['messages'][] = $exception->getMessage();
+        }
+
+        return $result;
     }
 
     public function showAllAddOns()
@@ -223,18 +315,224 @@ class AddOnManager extends Service
         return $list;
     }
 
-    public function loadActivatedAddOns()
+    public function loadActivatedAddOns(
+        ?Application $application = null,
+        ?RegistrationPlan $plan = null
+    ): array
     {
+        if (($application === null) !== ($plan === null)) {
+            throw new \InvalidArgumentException(
+                'Application and registration plan must be provided together.'
+            );
+        }
+
         $addOns = $this->_model->getActivatedAddOns();
         $results = Arr::make([]);
 
         foreach ($addOns as $addOn) {
             $object = new AddOn;
             $object->assign($addOn);
-            $results->push($this->loadAddOn($object));
+            $load = $this->loadAddOn($object);
+
+            if (Flag::isFalse($load['ok']) || !Func::isCallable($load['value'] ?? null)) {
+                $load['registration'] = $this->registrationResult(
+                    Flag::isFalse($load['ok']) ? 'load_failed' : 'not_applicable'
+                );
+                $results->push($load);
+                continue;
+            }
+
+            if ($application === null || $plan === null) {
+                $load['registration'] = $this->registrationResult('pending');
+                $results->push($load);
+                continue;
+            }
+
+            $key = $this->addOnRuntimeKey($object, $load['path']);
+            if (Arr::hasKey($this->_registeredAddOns, $key)) {
+                $load['registration'] = $this->registrationResult('already_registered');
+                $results->push($load);
+                continue;
+            }
+
+            try {
+                Func::make($load['value'])->call($application, $plan);
+                $this->_registeredAddOns[$key] = true;
+                $load['registration'] = $this->registrationResult('registered', true);
+            } catch (\Throwable $exception) {
+                $load['ok'] = false;
+                $load['stage'] = 'registration';
+                $load['error'] = $exception->getMessage();
+                $load['exception'] = $exception::class;
+                $load['registration'] = $this->registrationResult(
+                    'failed',
+                    false,
+                    $exception
+                );
+            }
+
+            $results->push($load);
         }
 
         return $results->toArray();
+    }
+
+    public function loadActivatedContributions(string $name): array
+    {
+        $name = Str::lower(Str::trim($name));
+        if (Val::isEmpty($name) || !Str::matchPattern($name, '/^[a-z0-9][a-z0-9._-]*$/')) {
+            throw new \InvalidArgumentException('Contribution names must be safe file identifiers.');
+        }
+
+        $entries = Arr::make([]);
+        foreach ($this->_model->getActivatedAddOns() as $record) {
+            $addOn = new AddOn;
+            $addOn->assign($record);
+            $entries->push($this->loadContribution($addOn, $name));
+        }
+
+        $failed = $entries
+            ->filter(fn ($entry) => Str::match((string)Arr::getPath($entry, 'status'), 'failed'))
+            ->values();
+        $loaded = $entries
+            ->filter(fn ($entry) => Str::match((string)Arr::getPath($entry, 'status'), 'loaded'))
+            ->values();
+        $missing = $entries
+            ->filter(fn ($entry) => Str::match((string)Arr::getPath($entry, 'status'), 'missing'))
+            ->values();
+        $snapshot = $entries->toArray();
+
+        return Arr::make([
+            'ok' => Arr::isEmpty($failed->toArray()),
+            'name' => $name,
+            'revision' => Hash::value(HTTP::jsonEncode($snapshot), 'sha256'),
+            'total' => Arr::size($snapshot),
+            'loaded' => $loaded->count(),
+            'missing' => $missing->count(),
+            'failed' => $failed->count(),
+            'results' => $snapshot,
+        ])->toArray();
+    }
+
+    protected function loadContribution(AddOn $addOn, string $name): array
+    {
+        $resolution = $this->resolveContributionFile($addOn, $name);
+        $entry = Arr::make([
+            'ok' => true,
+            'addonId' => $addOn->addon_id,
+            'addon' => $addOn->name,
+            'name' => $name,
+            'status' => $resolution['status'],
+            'path' => $resolution['path'],
+            'attempted' => $resolution['attempted'],
+            'data' => [],
+            'error' => $resolution['error'],
+            'exception' => null,
+        ]);
+
+        if (Str::match($resolution['status'], 'missing')) {
+            return $entry->toArray();
+        }
+
+        if (Flag::isFalse($resolution['ok'])) {
+            $entry->set('ok', false);
+            $entry->set('status', 'failed');
+
+            return $entry->toArray();
+        }
+
+        try {
+            $data = $this->includeContribution($resolution['path']);
+            if (!Arr::is($data) || Flag::isFalse($this->isPassiveContribution($data))) {
+                throw new \UnexpectedValueException(
+                    'Contribution files must return arrays containing only passive data.'
+                );
+            }
+
+            $entry->set('status', 'loaded');
+            $entry->set('data', Arr::make($data)->toArray());
+        } catch (\Throwable $exception) {
+            $entry->set('ok', false);
+            $entry->set('status', 'failed');
+            $entry->set('error', $exception->getMessage());
+            $entry->set('exception', $exception::class);
+        }
+
+        return $entry->toArray();
+    }
+
+    protected function includeContribution(string $path): mixed
+    {
+        return include($path);
+    }
+
+    private function resolveContributionFile(AddOn $addOn, string $name): array
+    {
+        $addOnName = $this->normalizeAddOnIdentifier($addOn->name, 'name');
+        $relative = 'mapping' . DIRECTORY_SEPARATOR . $name . '.php';
+        $canonicalRoot = Path::normalize(resolve_path('addons' . DIRECTORY_SEPARATOR . $addOnName));
+        $configuredRoot = Path::normalize((string)$addOn->path);
+        $candidates = Arr::make([]);
+
+        if (Val::isNotEmpty($configuredRoot)) {
+            $candidates->push(Path::normalize($configuredRoot . DIRECTORY_SEPARATOR . $relative));
+        }
+
+        $canonical = Path::normalize($canonicalRoot . DIRECTORY_SEPARATOR . $relative);
+        if (Val::isEmpty($configuredRoot) || Flag::isFalse($candidates->has($canonical))) {
+            $candidates->push($canonical);
+        }
+
+        foreach ($candidates as $candidate) {
+            if (!(new File())->isReachable($candidate)) {
+                continue;
+            }
+
+            if (Flag::isFalse($this->primaryFileIsContained($candidate, $canonicalRoot))) {
+                return Arr::make([
+                    'ok' => false,
+                    'status' => 'unsafe',
+                    'path' => null,
+                    'attempted' => $candidates->toArray(),
+                    'error' => 'Contribution file escapes its configured add-on root.',
+                ])->toArray();
+            }
+
+            return Arr::make([
+                'ok' => true,
+                'status' => 'resolved',
+                'path' => Path::normalize(realpath($candidate)),
+                'attempted' => $candidates->toArray(),
+                'error' => null,
+            ])->toArray();
+        }
+
+        return Arr::make([
+            'ok' => true,
+            'status' => 'missing',
+            'path' => null,
+            'attempted' => $candidates->toArray(),
+            'error' => null,
+        ])->toArray();
+    }
+
+    private function isPassiveContribution(mixed $value): bool
+    {
+        if (Func::isCallable($value) || is_object($value) || is_resource($value)) {
+            return false;
+        }
+
+        if (!Arr::is($value)) {
+            return true;
+        }
+
+        foreach ($value as $item) {
+            if (Flag::isFalse($this->isPassiveContribution($item))) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     protected function loadAddOn(AddOn $addOn): array
@@ -244,10 +542,45 @@ class AddOnManager extends Service
             return $resolution;
         }
 
+        $key = $this->addOnRuntimeKey($addOn, $resolution['path']);
+        if (Arr::hasKey($this->_loadedAddOns, $key)) {
+            $loaded = $this->_loadedAddOns[$key];
+            $loaded['status'] = 'already_loaded';
+            $loaded['changed'] = false;
+
+            return $loaded;
+        }
+
         $resolution['value'] = require_once($resolution['path']);
         $resolution['status'] = 'loaded';
+        $resolution['stage'] = 'load';
+        $resolution['changed'] = true;
+        $this->_loadedAddOns[$key] = $resolution;
 
         return $resolution;
+    }
+
+    private function addOnRuntimeKey(AddOn $addOn, string $primaryFile): string
+    {
+        $identifier = Val::isNotEmpty($addOn->addon_id)
+            ? (string)$addOn->addon_id
+            : (string)$addOn->name;
+
+        return Str::lower(Str::trim($identifier)) . ':' . Path::normalize($primaryFile);
+    }
+
+    private function registrationResult(
+        string $status,
+        bool $executed = false,
+        ?\Throwable $exception = null
+    ): array {
+        return Arr::make([
+            'ok' => $exception === null && $status !== 'load_failed',
+            'status' => $status,
+            'executed' => $executed,
+            'error' => $exception?->getMessage(),
+            'exception' => $exception === null ? null : $exception::class,
+        ])->toArray();
     }
 
     protected function callHook(AddOn $addOn, $hook)
@@ -257,18 +590,23 @@ class AddOnManager extends Service
         $result = Arr::make([
             'ok' => false,
             'hook' => $hook,
+            'stage' => 'hook',
             'status' => 'pending',
+            'optional' => false,
             'strategy' => null,
             'callable' => null,
             'attempted' => [],
             'primaryFile' => $resolution['path'],
             'primaryFileResolution' => $resolution,
             'error' => null,
+            'exception' => null,
+            'nextAction' => null,
         ]);
 
         if (Flag::isFalse($resolution['ok'])) {
             $result->set('status', $resolution['status']);
             $result->set('error', $resolution['error']);
+            $result->set('nextAction', 'review_primary_file');
 
             return $result->toArray();
         }
@@ -289,19 +627,42 @@ class AddOnManager extends Service
                 continue;
             }
 
-            Func::make($candidate)->call();
-            $result->set('ok', true);
-            $result->set('status', 'called');
-            $result->set('strategy', $candidate === $legacyHook ? 'legacy' : 'namespaced');
-            $result->set('callable', $candidate);
+            try {
+                Func::make($candidate)->call();
+                $result->set('ok', true);
+                $result->set('status', 'called');
+                $result->set('strategy', $candidate === $legacyHook ? 'legacy' : 'namespaced');
+                $result->set('callable', $candidate);
+            } catch (\Throwable $exception) {
+                $result->set('status', 'failed');
+                $result->set('strategy', $candidate === $legacyHook ? 'legacy' : 'namespaced');
+                $result->set('callable', $candidate);
+                $result->set('error', $exception->getMessage());
+                $result->set('exception', $exception::class);
+                $result->set('nextAction', 'retry_hook');
+            }
 
             return $result->toArray();
         }
 
-        $result->set('status', 'missing_callable');
-        $result->set('error', 'No compatible lifecycle hook callable was found.');
+		$result->set('ok', true);
+		$result->set('status', 'skipped');
+		$result->set('optional', true);
 
-        return $result->toArray();
+		return $result->toArray();
+	}
+
+    private function withHookFailure(array $result, array $hookResult, string $action): array
+    {
+        $result['ok'] = false;
+        $result['changed'] = false;
+        $result['stage'] = 'hook';
+        $result['nextAction'] = Arr::getPath($hookResult, 'nextAction', "retry_{$action}");
+        $result['error'] = Arr::getPath($hookResult, 'error', 'Add-on lifecycle hook failed.');
+        $result['messages'][] = $result['error'];
+        $result['modelStatus'] = $this->_model->status();
+
+        return $result;
     }
 
     protected function resolvePrimaryFile(AddOn $addOn): array
@@ -624,11 +985,41 @@ class AddOnManager extends Service
     {
         $this->_model->clear();
         $this->_model->read();
+        $records = $this->_model->all();
 
-        return Arr::make(Arr::toArray($this->_model->all(), true))
-            ->map(fn ($addOn) => Arr::toArray($addOn, true))
+        if ($records instanceof ICollection) {
+            $records = $records->toArray(true);
+        } elseif ($records instanceof \Traversable) {
+            $records = iterator_to_array($records);
+        } else {
+            $records = Arr::toArray($records, true);
+        }
+
+        return Arr::make($records)
+            ->map(fn ($addOn) => $this->normalizeInstalledAddOn($addOn))
             ->values()
             ->toArray();
+    }
+
+    private function normalizeInstalledAddOn(mixed $addOn): array
+    {
+        if (Arr::is($addOn)) {
+            return $addOn;
+        }
+
+        if ($addOn instanceof ICollection) {
+            return $addOn->toArray(true);
+        }
+
+        if (Func::isCallable([$addOn, 'data'])) {
+            return Arr::toArray(Func::make([$addOn, 'data'])->call(), true);
+        }
+
+        if (is_object($addOn)) {
+            return get_object_vars($addOn);
+        }
+
+        return [];
     }
 
     protected function datasourceManager(): mixed
@@ -681,6 +1072,8 @@ class AddOnManager extends Service
             'messages' => $ok ? [] : ['Add-on registration could not be updated.'],
             'dependencies' => [],
             'hooks' => [],
+			'migrations' => [],
+			'population' => [],
             'modelStatus' => $modelStatus,
             'query' => $query,
         ])->toArray();

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "08d994f7ee7599ad096cc28a1903bf6e",
+    "content-hash": "4985f677a975d6caca1d7582966070cf",
     "packages": [
         {
             "name": "bluefission/develation",

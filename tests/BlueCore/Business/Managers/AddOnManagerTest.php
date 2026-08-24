@@ -4,6 +4,10 @@ namespace BlueFission\Tests\BlueCore\Business\Managers;
 
 use BlueFission\BlueCore\Business\Managers\AddOnManager;
 use BlueFission\BlueCore\Domain\AddOn\AddOn;
+use BlueFission\BlueCore\Registration\RegistrationPlan;
+use BlueFission\Collections\Collection;
+use BlueFission\Collections\Group;
+use BlueFission\Services\Application;
 use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -32,6 +36,11 @@ class AddOnManagerTest extends TestCase
 
     protected function setUp(): void
     {
+        unset(
+            $GLOBALS['bluecore_registration_factory_calls'],
+            $GLOBALS['bluecore_inactive_primary_loads']
+        );
+
         if (self::$ownsRoot) {
             $this->removeDir(self::$root);
         }
@@ -207,7 +216,7 @@ class AddOnManagerTest extends TestCase
         $this->assertSame(['namespaced', 'legacy'], $GLOBALS['bluecore_hook_calls']);
     }
 
-    public function testMissingHookReturnsStructuredDiagnostics(): void
+    public function testMissingHookReturnsOptionalSkippedOutcome(): void
     {
         $manager = new TestableAddOnManager(new FakeAddOnModel());
         $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'missing';
@@ -222,13 +231,172 @@ class AddOnManagerTest extends TestCase
 
         $result = $manager->hook($addOn, 'install');
 
-        $this->assertFalse($result['ok']);
-        $this->assertSame('missing_callable', $result['status']);
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['optional']);
+        $this->assertSame('skipped', $result['status']);
         $this->assertSame(
             ['Vendor\\Package\\missing_install', 'missing_install'],
             $result['attempted']
         );
-        $this->assertNotEmpty($result['error']);
+        $this->assertNull($result['error']);
+    }
+
+    public function testInstallBlocksBeforeDatasourceWhenPrimaryFileIsMissing(): void
+    {
+        $this->writeDefinition('missingprimary', createPrimaryFile: false);
+        $model = new FakeAddOnModel();
+        $datasource = new FakeDatasourceManager();
+        $manager = new TestableAddOnManager($model, $datasource);
+
+        $result = $manager->install('missingprimary');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('hook', $result['stage']);
+        $this->assertSame('missing_primary_file', $result['hooks'][0]['status']);
+        $this->assertFalse($result['hooks'][0]['optional']);
+        $this->assertSame(0, $datasource->migrationRuns);
+        $this->assertSame([], $model->records);
+    }
+
+    public function testThrownInstallHookPreventsRegistrationWrite(): void
+    {
+        $this->writeDefinition('failinginstall');
+        File::ensureFile(
+            self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'failinginstall' . DIRECTORY_SEPARATOR . 'main.php',
+            "<?php function failinginstall_install(): void { throw new RuntimeException('Install hook failed.'); }",
+            true
+        );
+        $model = new FakeAddOnModel();
+        $manager = new TestableAddOnManager($model, new FakeDatasourceManager());
+
+        $result = $manager->install('failinginstall');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('hook', $result['stage']);
+        $this->assertSame('failed', $result['hooks'][0]['status']);
+        $this->assertSame(\RuntimeException::class, $result['hooks'][0]['exception']);
+        $this->assertSame('retry_hook', $result['nextAction']);
+        $this->assertSame([], $model->records);
+    }
+
+    public function testThrownUninstallHookPreservesRegistration(): void
+    {
+        $this->writeDefinition('failinguninstall');
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'failinguninstall';
+        File::ensureFile(
+            $path . DIRECTORY_SEPARATOR . 'main.php',
+            "<?php function failinguninstall_uninstall(): void { throw new RuntimeException('Uninstall hook failed.'); }",
+            true
+        );
+        $model = new FakeAddOnModel([[
+            'addon_id' => 9,
+            'name' => 'failinguninstall',
+            'path' => $path,
+            'primary_file' => 'main.php',
+            'is_active' => 1,
+        ]]);
+        $manager = new TestableAddOnManager($model, new FakeDatasourceManager());
+
+        $result = $manager->uninstall(9);
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('hook', $result['stage']);
+        $this->assertSame('Uninstall hook failed.', $result['error']);
+        $this->assertCount(1, $model->records);
+        $this->assertSame([], $model->deletes);
+    }
+
+    public function testInstallAllCountsNormalizedHookOutcomes(): void
+    {
+        $this->writeDefinition('batchgood');
+        $this->writeDefinition('batchfail');
+        File::ensureFile(
+            self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'batchfail' . DIRECTORY_SEPARATOR . 'main.php',
+            "<?php function batchfail_install(): void { throw new RuntimeException('Batch hook failed.'); }",
+            true
+        );
+        $manager = new TestableAddOnManager(new FakeAddOnModel(), new FakeDatasourceManager());
+
+        $result = $manager->installAll();
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame(2, $result['total']);
+        $this->assertSame(1, $result['succeeded']);
+        $this->assertSame(1, $result['failed']);
+    }
+
+    public function testPassiveContributionsIncludeOnlyActiveAddOnsAndExposeRevisionChanges(): void
+    {
+        $firstPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'first';
+        $secondPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'second';
+        File::ensureFile(
+            $firstPath . DIRECTORY_SEPARATOR . 'mapping' . DIRECTORY_SEPARATOR . 'capabilities.php',
+            "<?php return ['tools' => ['first']];",
+            true
+        );
+        File::ensureFile(
+            $secondPath . DIRECTORY_SEPARATOR . 'mapping' . DIRECTORY_SEPARATOR . 'capabilities.php',
+            "<?php return ['tools' => ['second']];",
+            true
+        );
+        $model = new FakeAddOnModel([
+            ['addon_id' => 1, 'name' => 'first', 'path' => $firstPath, 'is_active' => 1],
+            ['addon_id' => 2, 'name' => 'second', 'path' => $secondPath, 'is_active' => 0],
+        ]);
+        $manager = new TestableAddOnManager($model);
+
+        $initial = $manager->loadActivatedContributions('capabilities');
+        $manager->activate(2);
+        $activated = $manager->loadActivatedContributions('capabilities');
+
+        $this->assertTrue($initial['ok']);
+        $this->assertSame(1, $initial['total']);
+        $this->assertSame('first', $initial['results'][0]['addon']);
+        $this->assertSame(['tools' => ['first']], $initial['results'][0]['data']);
+        $this->assertSame(2, $activated['total']);
+        $this->assertNotSame($initial['revision'], $activated['revision']);
+    }
+
+    public function testPassiveContributionsReportMissingMalformedAndFailedFiles(): void
+    {
+        $missingPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'missing';
+        $malformedPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'malformed';
+        $failedPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'failed';
+        Path::ensureDir($missingPath);
+        File::ensureFile(
+            $malformedPath . DIRECTORY_SEPARATOR . 'mapping' . DIRECTORY_SEPARATOR . 'capabilities.php',
+            "<?php return ['factory' => static function (): void {}];",
+            true
+        );
+        File::ensureFile(
+            $failedPath . DIRECTORY_SEPARATOR . 'mapping' . DIRECTORY_SEPARATOR . 'capabilities.php',
+            "<?php throw new RuntimeException('Contribution failed.');",
+            true
+        );
+        $manager = new TestableAddOnManager(new FakeAddOnModel([
+            ['addon_id' => 1, 'name' => 'missing', 'path' => $missingPath, 'is_active' => 1],
+            ['addon_id' => 2, 'name' => 'malformed', 'path' => $malformedPath, 'is_active' => 1],
+            ['addon_id' => 3, 'name' => 'failed', 'path' => $failedPath, 'is_active' => 1],
+        ]));
+
+        $result = $manager->loadActivatedContributions('capabilities');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame(3, $result['total']);
+        $this->assertSame(1, $result['missing']);
+        $this->assertSame(2, $result['failed']);
+        $this->assertSame('missing', $result['results'][0]['status']);
+        $this->assertSame('failed', $result['results'][1]['status']);
+        $this->assertSame(\UnexpectedValueException::class, $result['results'][1]['exception']);
+        $this->assertSame('Contribution failed.', $result['results'][2]['error']);
+    }
+
+    public function testPassiveContributionNamesRejectPathTraversal(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+
+        $this->expectException(\InvalidArgumentException::class);
+        $manager->loadActivatedContributions('../capabilities');
     }
 
     public function testPrimaryFilePrefersReachableConfiguredCandidate(): void
@@ -379,6 +547,119 @@ class AddOnManagerTest extends TestCase
         $this->assertContains('portable', $GLOBALS['bluecore_hook_calls']);
     }
 
+    public function testActiveRegistrationFactoryExecutesOnceAfterBaselinePlanIsAvailable(): void
+    {
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'factory';
+        File::ensureFile(
+            $path . DIRECTORY_SEPARATOR . 'main.php',
+            <<<'PHP'
+<?php
+
+return static function (\BlueFission\Services\Application $application, \BlueFission\BlueCore\Registration\RegistrationPlan $plan): void {
+    $GLOBALS['bluecore_registration_factory_calls'] =
+        ($GLOBALS['bluecore_registration_factory_calls'] ?? 0) + 1;
+    $plan->service('factory.service', $application->name());
+};
+PHP,
+            true
+        );
+        $model = new FakeAddOnModel([
+            [
+                'addon_id' => 21,
+                'name' => 'factory',
+                'path' => $path,
+                'primary_file' => 'main.php',
+                'is_active' => 1,
+            ],
+        ]);
+        $manager = new TestableAddOnManager($model);
+        $application = new Application(['name' => 'registration-factory-test']);
+        $plan = (new RegistrationPlan())->service('baseline', 'ready');
+
+        $first = $manager->loadActivatedAddOns($application, $plan);
+        $second = $manager->loadActivatedAddOns($application, $plan);
+
+        $this->assertTrue($first[0]['ok']);
+        $this->assertSame('registered', $first[0]['registration']['status']);
+        $this->assertTrue($first[0]['registration']['executed']);
+        $this->assertSame('already_registered', $second[0]['registration']['status']);
+        $this->assertFalse($second[0]['registration']['executed']);
+        $this->assertSame(1, $GLOBALS['bluecore_registration_factory_calls']);
+        $this->assertSame('ready', $plan->entries('services')['baseline']);
+        $this->assertSame('registration-factory-test', $plan->entries('services')['factory.service']);
+    }
+
+    public function testInactiveAndLegacyAddOnsDoNotExecuteRegistrationFactories(): void
+    {
+        $activePath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'legacyload';
+        $inactivePath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'inactive';
+        File::ensureFile($activePath . DIRECTORY_SEPARATOR . 'main.php', '<?php return null;', true);
+        File::ensureFile(
+            $inactivePath . DIRECTORY_SEPARATOR . 'main.php',
+            "<?php \$GLOBALS['bluecore_inactive_primary_loads'] = true; return static function (): void {};",
+            true
+        );
+        $manager = new TestableAddOnManager(new FakeAddOnModel([
+            [
+                'addon_id' => 22,
+                'name' => 'legacyload',
+                'path' => $activePath,
+                'primary_file' => 'main.php',
+                'is_active' => 1,
+            ],
+            [
+                'addon_id' => 23,
+                'name' => 'inactive',
+                'path' => $inactivePath,
+                'primary_file' => 'main.php',
+                'is_active' => 0,
+            ],
+        ]));
+
+        $results = $manager->loadActivatedAddOns(
+            new Application(['name' => 'legacy-registration-test']),
+            new RegistrationPlan()
+        );
+
+        $this->assertCount(1, $results);
+        $this->assertTrue($results[0]['ok']);
+        $this->assertSame('not_applicable', $results[0]['registration']['status']);
+        $this->assertArrayNotHasKey('bluecore_inactive_primary_loads', $GLOBALS);
+    }
+
+    public function testRegistrationFactoryFailureKeepsOriginalDiagnosticsAndCanRetry(): void
+    {
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'failingfactory';
+        File::ensureFile(
+            $path . DIRECTORY_SEPARATOR . 'main.php',
+            '<?php return static function (): void { throw new \\DomainException("factory failed"); };',
+            true
+        );
+        $manager = new TestableAddOnManager(new FakeAddOnModel([
+            [
+                'addon_id' => 24,
+                'name' => 'failingfactory',
+                'path' => $path,
+                'primary_file' => 'main.php',
+                'is_active' => 1,
+            ],
+        ]));
+        $application = new Application(['name' => 'failing-registration-test']);
+        $plan = new RegistrationPlan();
+
+        $first = $manager->loadActivatedAddOns($application, $plan);
+        $second = $manager->loadActivatedAddOns($application, $plan);
+
+        foreach ([$first[0], $second[0]] as $result) {
+            $this->assertFalse($result['ok']);
+            $this->assertSame('registration', $result['stage']);
+            $this->assertSame('failed', $result['registration']['status']);
+            $this->assertSame('factory failed', $result['error']);
+            $this->assertSame(\DomainException::class, $result['exception']);
+            $this->assertSame(Path::normalize($path . DIRECTORY_SEPARATOR . 'main.php'), $result['path']);
+        }
+    }
+
     public function testActivateAndActivateAllReturnStructuredStatuses(): void
     {
         $model = new FakeAddOnModel([
@@ -423,6 +704,72 @@ class AddOnManagerTest extends TestCase
         $this->assertSame('Persisted add-on row is missing addon_id.', $result['results'][1]['error']);
     }
 
+    #[DataProvider('collectionContainerProvider')]
+    public function testBulkLifecyclePreservesCollectionRowsAndNamespaceRoundTrips(string $container): void
+    {
+        $namespace = 'BlueFission\\Fixtures\\InstalledAddOn';
+        $records = [
+            [
+                'addon_id' => 31,
+                'name' => 'first',
+                'namespace' => $namespace,
+                'path' => '/addons/first',
+                'primary_file' => 'main.php',
+                'is_active' => 0,
+            ],
+            [
+                'addon_id' => 32,
+                'name' => 'second',
+                'namespace' => 'BlueFission\\Fixtures\\SecondAddOn',
+                'path' => '/addons/second',
+                'primary_file' => 'bootstrap.php',
+                'is_active' => 0,
+            ],
+        ];
+        $model = new FakeAddOnModel($records, containerClass: $container);
+        $manager = new TestableAddOnManager($model);
+
+        $activated = $manager->activateAll();
+        $deactivated = $manager->deactivateAll();
+
+        $this->assertTrue($activated['ok']);
+        $this->assertSame(2, $activated['total']);
+        $this->assertSame($records[0], $activated['results'][0]['record']);
+        $this->assertSame($namespace, $activated['results'][0]['record']['namespace']);
+        $this->assertTrue($deactivated['ok']);
+        $this->assertSame(2, $deactivated['total']);
+        $this->assertSame($namespace, $model->records[0]['namespace']);
+        $this->assertSame([1, 1, 0, 0], array_column($model->writes, 'is_active'));
+    }
+
+    public static function collectionContainerProvider(): array
+    {
+        return [
+            'collection' => [Collection::class],
+            'group' => [Group::class],
+        ];
+    }
+
+    public function testDeactivateAllFailsClosedForMalformedRowsAndWriteFailures(): void
+    {
+        $model = new FakeAddOnModel([
+            ['addon_id' => 41, 'name' => 'failed', 'is_active' => 1],
+            ['name' => 'malformed', 'is_active' => 1],
+        ], containerClass: Group::class, failWritesForIds: [41]);
+        $manager = new TestableAddOnManager($model);
+
+        $result = $manager->deactivateAll();
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('deactivate_all', $result['action']);
+        $this->assertSame(2, $result['total']);
+        $this->assertSame(0, $result['succeeded']);
+        $this->assertSame(2, $result['failed']);
+        $this->assertSame('registration', $result['results'][0]['stage']);
+        $this->assertSame('failed', $result['results'][1]['stage']);
+        $this->assertSame('malformed', $result['results'][1]['record']['name']);
+    }
+
     public function testRepeatedInstallUsesSupportedModelOperationsAndDoesNotDuplicateRegistration(): void
     {
         $this->writeDefinition('demo');
@@ -438,6 +785,92 @@ class AddOnManagerTest extends TestCase
         $this->assertSame('complete', $second['stage']);
         $this->assertCount(1, $model->records);
         $this->assertSame(1, $datasource->migrationRuns);
+    }
+
+    public function testInstalledAddOnAppliesOnlyPendingMigrationsAndRepeatsAsNoOp(): void
+    {
+        $this->writeDefinition('demo');
+        $model = new FakeAddOnModel();
+        $datasource = new FakeDatasourceManager();
+        $datasource->publish('001_initial.php');
+        $manager = new TestableAddOnManager($model, $datasource);
+
+        $install = $manager->install('demo');
+        $datasource->publish('002_later.php');
+        $refresh = $manager->migrate($model->records[0]['addon_id']);
+        $repeat = $manager->migrate($model->records[0]['addon_id']);
+
+        $this->assertTrue($install['ok']);
+        $this->assertSame(1, $install['migrations']['applied']);
+        $this->assertTrue($refresh['ok']);
+        $this->assertTrue($refresh['changed']);
+        $this->assertSame('complete', $refresh['stage']);
+        $this->assertSame('002_later.php', $refresh['migrations']['results'][0]['name']);
+        $this->assertTrue($repeat['ok']);
+        $this->assertFalse($repeat['changed']);
+        $this->assertSame(0, $repeat['migrations']['total']);
+        $this->assertSame(1, $datasource->populationRuns);
+    }
+
+    public function testMigrationHistoryIsScopedToEachInstalledAddOn(): void
+    {
+        $this->writeDefinition('first');
+        $this->writeDefinition('second');
+        $datasource = new FakeDatasourceManager();
+        $datasource->publish('001_shared.php');
+        $manager = new TestableAddOnManager(new FakeAddOnModel(), $datasource);
+
+        $first = $manager->install('first');
+        $second = $manager->install('second');
+
+        $this->assertSame(1, $first['migrations']['applied']);
+        $this->assertSame(1, $second['migrations']['applied']);
+        $this->assertSame(['001_shared.php'], $datasource->appliedFor('first'));
+        $this->assertSame(['001_shared.php'], $datasource->appliedFor('second'));
+    }
+
+    public function testMigrationFailurePreventsSuccessAndRemainsRetryable(): void
+    {
+        $this->writeDefinition('demo');
+        $model = new FakeAddOnModel();
+        $datasource = new FakeDatasourceManager();
+        $datasource->publish('001_initial.php');
+        $manager = new TestableAddOnManager($model, $datasource);
+        $manager->install('demo');
+        $datasource->publish('002_retry.php');
+        $datasource->failOn('002_retry.php');
+
+        $failed = $manager->migrate($model->records[0]['addon_id']);
+        $retried = $manager->migrate($model->records[0]['addon_id']);
+
+        $this->assertFalse($failed['ok']);
+        $this->assertFalse($failed['changed']);
+        $this->assertSame('datasource', $failed['stage']);
+        $this->assertSame('retry_migrate', $failed['nextAction']);
+        $this->assertSame('Migration 002_retry.php failed.', $failed['error']);
+        $this->assertFalse($retried['ok']);
+        $this->assertSame('002_retry.php', $retried['migrations']['results'][0]['name']);
+        $this->assertSame(['001_initial.php'], $datasource->appliedFor('demo'));
+    }
+
+    public function testPopulationFailurePreventsHooksAndRegistrationWrite(): void
+    {
+        $this->writeDefinition('demo');
+        $model = new FakeAddOnModel();
+        $datasource = new FakeDatasourceManager();
+        $datasource->failPopulation('DemoSeeder.php failed.');
+        $manager = new TestableAddOnManager($model, $datasource);
+
+        $result = $manager->install('demo');
+
+        $this->assertFalse($result['ok']);
+        $this->assertFalse($result['changed']);
+        $this->assertSame('datasource', $result['stage']);
+        $this->assertSame('review_population_failure', $result['nextAction']);
+        $this->assertSame('DemoSeeder.php failed.', $result['error']);
+        $this->assertSame('DemoSeeder.php', $result['population']['results'][0]['name']);
+        $this->assertSame(1, $datasource->populationRuns);
+        $this->assertSame([], $model->records);
     }
 
     public function testFailedTeardownPreservesRegistrationForRetry(): void
@@ -490,7 +923,7 @@ class AddOnManagerTest extends TestCase
         $this->assertSame([], $model->records);
     }
 
-    private function writeDefinition(string $name): void
+    private function writeDefinition(string $name, bool $createPrimaryFile = true): void
     {
         File::ensureFile(
             self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . $name . DIRECTORY_SEPARATOR . 'definition.json',
@@ -501,6 +934,14 @@ class AddOnManagerTest extends TestCase
             ]),
             true
         );
+
+        if ($createPrimaryFile) {
+            File::ensureFile(
+                self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . $name . DIRECTORY_SEPARATOR . 'main.php',
+                '<?php',
+                true
+            );
+        }
     }
 
     private function removeDir($dir): void
@@ -585,6 +1026,7 @@ class FakeAddOnModel
     public function __construct(
         array $addons = [],
         private bool $returnArrays = false,
+        private ?string $containerClass = null,
         private array $failWritesForIds = []
     )
     {
@@ -659,13 +1101,23 @@ class FakeAddOnModel
         return $this->current;
     }
 
-    public function all(): array
+    public function all(): mixed
     {
-        if ($this->returnArrays) {
-            return $this->records;
-        }
+        $records = $this->returnArrays
+            ? $this->records
+            : array_map(static fn($record) => (object)$record, $this->records);
 
-        return array_map(static fn($record) => (object)$record, $this->records);
+        return $this->containerClass === null
+            ? $records
+            : new $this->containerClass($records);
+    }
+
+    public function getActivatedAddOns(): array
+    {
+        return array_values(array_filter(
+            $this->records,
+            static fn ($record) => (int)($record['is_active'] ?? 0) === 1
+        ));
     }
 
     public function delete($values): void
@@ -694,6 +1146,11 @@ class FakeAddOnModel
 class FakeDatasourceManager
 {
     public int $migrationRuns = 0;
+    public int $populationRuns = 0;
+    private array $published = [];
+    private array $applied = [];
+    private ?string $failedMigration = null;
+    private ?string $populationError = null;
 
     public function __construct(private bool $failRollback = false)
     {
@@ -707,13 +1164,112 @@ class FakeDatasourceManager
     {
     }
 
-    public function runMigrations(string $batch): void
+    public function publish(string $migration): void
     {
-        $this->migrationRuns++;
+        if (!\BlueFission\Arr::has($this->published, $migration, true)) {
+            $this->published[] = $migration;
+        }
     }
 
-    public function populate(): void
+    public function failOn(?string $migration): void
     {
+        $this->failedMigration = $migration;
+    }
+
+    public function appliedFor(string $batch): array
+    {
+        return $this->applied[$batch] ?? [];
+    }
+
+    public function failPopulation(?string $message): void
+    {
+        $this->populationError = $message;
+    }
+
+    public function runMigrations(string $batch): array
+    {
+        $this->migrationRuns++;
+        $applied = $this->applied[$batch] ?? [];
+        $pending = \BlueFission\Arr::make($this->published)
+            ->diff($applied)
+            ->values()
+            ->toArray();
+        $results = [];
+
+        foreach ($pending as $migration) {
+            $ok = $migration !== $this->failedMigration;
+            $results[] = [
+                'ok' => $ok,
+                'name' => $migration,
+                'status' => $ok ? 'applied' : 'failed',
+                'error' => $ok ? null : "Migration {$migration} failed.",
+            ];
+
+            if (!$ok) {
+                return [
+                    'ok' => false,
+                    'batch' => $batch,
+                    'changed' => false,
+                    'total' => \BlueFission\Arr::size($pending),
+                    'applied' => 0,
+                    'failed' => 1,
+                    'results' => $results,
+                    'nextAction' => 'retry_migrations',
+                    'error' => "Migration {$migration} failed.",
+                ];
+            }
+
+            $this->applied[$batch][] = $migration;
+        }
+
+        return [
+            'ok' => true,
+            'batch' => $batch,
+            'changed' => \BlueFission\Arr::isNotEmpty($pending),
+            'total' => \BlueFission\Arr::size($pending),
+            'applied' => \BlueFission\Arr::size($pending),
+            'failed' => 0,
+            'results' => $results,
+            'nextAction' => null,
+            'error' => null,
+        ];
+    }
+
+    public function populate(): array
+    {
+        $this->populationRuns++;
+
+        if (\BlueFission\Val::isNotEmpty($this->populationError)) {
+            return [
+                'ok' => false,
+                'changed' => false,
+                'stage' => 'population',
+                'total' => 1,
+                'populated' => 0,
+                'failed' => 1,
+                'results' => [[
+                    'ok' => false,
+                    'name' => 'DemoSeeder.php',
+                    'status' => 'failed',
+                    'error' => $this->populationError,
+                    'exception' => \RuntimeException::class,
+                ]],
+                'nextAction' => 'review_population_failure',
+                'error' => $this->populationError,
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'changed' => false,
+            'stage' => 'complete',
+            'total' => 0,
+            'populated' => 0,
+            'failed' => 0,
+            'results' => [],
+            'nextAction' => null,
+            'error' => null,
+        ];
     }
 
     public function revertBatch(string $batch): void
