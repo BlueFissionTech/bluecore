@@ -233,40 +233,140 @@ class DatasourceManager extends Service {
 		}
 	}
 
-	public function populate( $auto = false )
+	public function populate($auto = false): array
 	{
-		if (!file_exists($this->_generatorDir)) {
-			return;
+		$result = Arr::make([
+			'ok' => true,
+			'changed' => false,
+			'stage' => 'discovery',
+			'total' => 0,
+			'populated' => 0,
+			'failed' => 0,
+			'results' => [],
+			'nextAction' => null,
+			'error' => null,
+		]);
+
+		if (Flag::isFalse($this->generatorDirectoryExists())) {
+			$result->set('stage', 'complete');
+
+			return $result->toArray();
 		}
 
-		$generators = $this->loadGenerators();
-		if ( Arr::has($generators, 'RootSeeder.php', true) ) {
-			$classname = $this->findClassName( $this->_generatorDir . 'RootSeeder.php' );
-			if ( $classname ) {
-				include_once($this->_generatorDir . 'RootSeeder.php');
-				$object = \App::makeInstance($classname);
-				if ( method_exists($object, 'seeders') ) {
-					$generators = Arr::make(call_user_func([$object, 'seeders']))
-						->map(fn ($generator) => Str::endsWith($generator, '.php') ? $generator : $generator . '.php')
-						->toArray();
+		try {
+			$generators = $this->orderedGenerators($this->loadGenerators());
+		} catch (\Throwable $exception) {
+			return $this->failedPopulationResult($result, 'RootSeeder.php', $exception);
+		}
+
+		$result->set('total', Arr::size($generators));
+		$result->set('stage', 'population');
+		$outcomes = Arr::make([]);
+
+		foreach ($generators as $generator) {
+			$outcome = Arr::make([
+				'ok' => false,
+				'name' => $generator,
+				'status' => 'pending',
+				'error' => null,
+				'exception' => null,
+			]);
+
+			try {
+				$classname = $this->findClassName($this->_generatorDir . $generator);
+				if (Val::isEmpty($classname)) {
+					throw new \RuntimeException('Population class could not be resolved.');
 				}
+
+				$this->includeGenerator($this->_generatorDir . $generator);
+				$object = $this->generatorInstance($classname);
+				if (Flag::isFalse(Func::isCallable([$object, 'populate']))) {
+					throw new \RuntimeException('Population class must expose populate().');
+				}
+
+				Func::make([$object, 'populate'])->call($auto);
+				$outcome->set('ok', true);
+				$outcome->set('status', 'populated');
+			} catch (\Throwable $exception) {
+				$outcome->set('status', 'failed');
+				$outcome->set('error', $exception->getMessage());
+				$outcome->set('exception', $exception::class);
+			}
+
+			$outcomes->push($outcome->toArray());
+			if (Flag::isFalse($outcome->get('ok'))) {
+				break;
 			}
 		}
 
-		foreach ( $generators as $generator ) {
-			$classname = '';
+		$failures = $outcomes
+			->filter(fn ($outcome) => Flag::isFalse(Arr::getPath($outcome, 'ok', false)))
+			->values();
+		$populated = $outcomes
+			->filter(fn ($outcome) => Flag::parseBool(Arr::getPath($outcome, 'ok', false)))
+			->values();
+		$result->set('results', $outcomes->toArray());
+		$result->set('populated', $populated->count());
+		$result->set('failed', $failures->count());
+		$result->set('changed', Arr::isNotEmpty($populated->toArray()));
+		$result->set('ok', Arr::isEmpty($failures->toArray()));
+		$result->set('stage', Arr::isEmpty($failures->toArray()) ? 'complete' : 'population');
 
-			if ( strpos($generator, '.') !== 0 ) {
-				$generator = Str::endsWith($generator, '.php') ? $generator : $generator . '.php';
-				
-				$classname = $this->findClassName( $this->_generatorDir . $generator );
-				if ( $classname ) {
-					include_once($this->_generatorDir . $generator);
-					$object = \App::makeInstance($classname);
-					call_user_func([$object, 'populate'], $auto);
-				}
-			}
+		if (Arr::isNotEmpty($failures->toArray())) {
+			$failure = Arr::getPath($failures->toArray(), '0', []);
+			$result->set('nextAction', 'review_population_failure');
+			$result->set('error', Arr::getPath($failure, 'error', 'Datasource population failed.'));
 		}
+
+		return $result->toArray();
+	}
+
+	protected function orderedGenerators(array $generators): array
+	{
+		$generators = Arr::make($generators)
+			->filter(fn ($generator) => Str::pos((string)$generator, '.') !== 0)
+			->map(fn ($generator) => Str::endsWith((string)$generator, '.php') ? $generator : $generator . '.php')
+			->values()
+			->toArray();
+
+		if (Flag::isFalse(Arr::has($generators, 'RootSeeder.php', true))) {
+			return $generators;
+		}
+
+		$classname = $this->findClassName($this->_generatorDir . 'RootSeeder.php');
+		if (Val::isEmpty($classname)) {
+			throw new \RuntimeException('Root seeder class could not be resolved.');
+		}
+
+		$this->includeGenerator($this->_generatorDir . 'RootSeeder.php');
+		$object = $this->generatorInstance($classname);
+		if (Flag::isFalse(Func::isCallable([$object, 'seeders']))) {
+			return $generators;
+		}
+
+		return Arr::make(Func::make([$object, 'seeders'])->call())
+			->map(fn ($generator) => Str::endsWith((string)$generator, '.php') ? $generator : $generator . '.php')
+			->values()
+			->toArray();
+	}
+
+	private function failedPopulationResult(Arr $result, string $generator, \Throwable $exception): array
+	{
+		$result->set('ok', false);
+		$result->set('stage', 'population');
+		$result->set('total', 1);
+		$result->set('failed', 1);
+		$result->set('nextAction', 'review_population_failure');
+		$result->set('error', $exception->getMessage());
+		$result->set('results', [[
+			'ok' => false,
+			'name' => $generator,
+			'status' => 'failed',
+			'error' => $exception->getMessage(),
+			'exception' => $exception::class,
+		]]);
+
+		return $result->toArray();
 	}
 
 	protected function getDeltasFromDB(&$iteration, ?string $batch = null): array
@@ -327,9 +427,24 @@ class DatasourceManager extends Service {
 		return $default;
 	}
 
-	private function loadGenerators()
+	protected function loadGenerators(): array
 	{
 		return scandir($this->_generatorDir);
+	}
+
+	protected function generatorDirectoryExists(): bool
+	{
+		return Flag::parseBool(Arr::getPath(Path::readiness($this->_generatorDir), 'exists', false));
+	}
+
+	protected function includeGenerator(string $path): void
+	{
+		include_once($path);
+	}
+
+	protected function generatorInstance(string $classname): object
+	{
+		return \App::makeInstance($classname);
 	}
 
 	protected function loadDeltas( $reverse = SCANDIR_SORT_ASCENDING )
