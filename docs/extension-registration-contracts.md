@@ -14,6 +14,15 @@ An extension can describe its contribution through a `RegistrationPlan`:
 
 Registrars implement `BlueFission\BlueCore\Contracts\IApplicationRegistrar` and receive both the application instance and a mutable `RegistrationPlan`.
 
+## Passive Contributions
+
+`loadActivatedContributions($name)` discovers optional `mapping/<name>.php`
+snapshots from active add-ons. Each file must return an array containing passive
+data only; callable and object values are rejected and never invoked. Results retain
+add-on identity, missing or failed status, diagnostics, and a deterministic revision
+that changes with the active contribution snapshot. BlueCore does not cache these
+results or validate domain-specific schemas.
+
 ## Add-on Lifecycle
 
 Add-on lifecycle managers implement `IAddOnLifecycleManager`:

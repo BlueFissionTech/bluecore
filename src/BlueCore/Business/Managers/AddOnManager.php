@@ -11,6 +11,7 @@ use BlueFission\Data\Storage\Storage;
 use BlueFission\Func;
 use BlueFission\Net\HTTP;
 use BlueFission\Flag;
+use BlueFission\Security\Hash;
 use BlueFission\BlueCore\Registration\RegistrationPlan;
 use BlueFission\Services\Application;
 use BlueFission\Services\Service;
@@ -374,6 +375,164 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
         }
 
         return $results->toArray();
+    }
+
+    public function loadActivatedContributions(string $name): array
+    {
+        $name = Str::lower(Str::trim($name));
+        if (Val::isEmpty($name) || !Str::matchPattern($name, '/^[a-z0-9][a-z0-9._-]*$/')) {
+            throw new \InvalidArgumentException('Contribution names must be safe file identifiers.');
+        }
+
+        $entries = Arr::make([]);
+        foreach ($this->_model->getActivatedAddOns() as $record) {
+            $addOn = new AddOn;
+            $addOn->assign($record);
+            $entries->push($this->loadContribution($addOn, $name));
+        }
+
+        $failed = $entries
+            ->filter(fn ($entry) => Str::match((string)Arr::getPath($entry, 'status'), 'failed'))
+            ->values();
+        $loaded = $entries
+            ->filter(fn ($entry) => Str::match((string)Arr::getPath($entry, 'status'), 'loaded'))
+            ->values();
+        $missing = $entries
+            ->filter(fn ($entry) => Str::match((string)Arr::getPath($entry, 'status'), 'missing'))
+            ->values();
+        $snapshot = $entries->toArray();
+
+        return Arr::make([
+            'ok' => Arr::isEmpty($failed->toArray()),
+            'name' => $name,
+            'revision' => Hash::value(HTTP::jsonEncode($snapshot), 'sha256'),
+            'total' => Arr::size($snapshot),
+            'loaded' => $loaded->count(),
+            'missing' => $missing->count(),
+            'failed' => $failed->count(),
+            'results' => $snapshot,
+        ])->toArray();
+    }
+
+    protected function loadContribution(AddOn $addOn, string $name): array
+    {
+        $resolution = $this->resolveContributionFile($addOn, $name);
+        $entry = Arr::make([
+            'ok' => true,
+            'addonId' => $addOn->addon_id,
+            'addon' => $addOn->name,
+            'name' => $name,
+            'status' => $resolution['status'],
+            'path' => $resolution['path'],
+            'attempted' => $resolution['attempted'],
+            'data' => [],
+            'error' => $resolution['error'],
+            'exception' => null,
+        ]);
+
+        if (Str::match($resolution['status'], 'missing')) {
+            return $entry->toArray();
+        }
+
+        if (Flag::isFalse($resolution['ok'])) {
+            $entry->set('ok', false);
+            $entry->set('status', 'failed');
+
+            return $entry->toArray();
+        }
+
+        try {
+            $data = $this->includeContribution($resolution['path']);
+            if (!Arr::is($data) || Flag::isFalse($this->isPassiveContribution($data))) {
+                throw new \UnexpectedValueException(
+                    'Contribution files must return arrays containing only passive data.'
+                );
+            }
+
+            $entry->set('status', 'loaded');
+            $entry->set('data', Arr::make($data)->toArray());
+        } catch (\Throwable $exception) {
+            $entry->set('ok', false);
+            $entry->set('status', 'failed');
+            $entry->set('error', $exception->getMessage());
+            $entry->set('exception', $exception::class);
+        }
+
+        return $entry->toArray();
+    }
+
+    protected function includeContribution(string $path): mixed
+    {
+        return include($path);
+    }
+
+    private function resolveContributionFile(AddOn $addOn, string $name): array
+    {
+        $addOnName = $this->normalizeAddOnIdentifier($addOn->name, 'name');
+        $relative = 'mapping' . DIRECTORY_SEPARATOR . $name . '.php';
+        $canonicalRoot = Path::normalize(resolve_path('addons' . DIRECTORY_SEPARATOR . $addOnName));
+        $configuredRoot = Path::normalize((string)$addOn->path);
+        $candidates = Arr::make([]);
+
+        if (Val::isNotEmpty($configuredRoot)) {
+            $candidates->push(Path::normalize($configuredRoot . DIRECTORY_SEPARATOR . $relative));
+        }
+
+        $canonical = Path::normalize($canonicalRoot . DIRECTORY_SEPARATOR . $relative);
+        if (Val::isEmpty($configuredRoot) || Flag::isFalse($candidates->has($canonical))) {
+            $candidates->push($canonical);
+        }
+
+        foreach ($candidates as $candidate) {
+            if (!(new File())->isReachable($candidate)) {
+                continue;
+            }
+
+            if (Flag::isFalse($this->primaryFileIsContained($candidate, $canonicalRoot))) {
+                return Arr::make([
+                    'ok' => false,
+                    'status' => 'unsafe',
+                    'path' => null,
+                    'attempted' => $candidates->toArray(),
+                    'error' => 'Contribution file escapes its configured add-on root.',
+                ])->toArray();
+            }
+
+            return Arr::make([
+                'ok' => true,
+                'status' => 'resolved',
+                'path' => Path::normalize(realpath($candidate)),
+                'attempted' => $candidates->toArray(),
+                'error' => null,
+            ])->toArray();
+        }
+
+        return Arr::make([
+            'ok' => true,
+            'status' => 'missing',
+            'path' => null,
+            'attempted' => $candidates->toArray(),
+            'error' => null,
+        ])->toArray();
+    }
+
+    private function isPassiveContribution(mixed $value): bool
+    {
+        if (Func::isCallable($value) || is_object($value) || is_resource($value)) {
+            return false;
+        }
+
+        if (!Arr::is($value)) {
+            return true;
+        }
+
+        foreach ($value as $item) {
+            if (Flag::isFalse($this->isPassiveContribution($item))) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     protected function loadAddOn(AddOn $addOn): array

@@ -325,6 +325,80 @@ class AddOnManagerTest extends TestCase
         $this->assertSame(1, $result['failed']);
     }
 
+    public function testPassiveContributionsIncludeOnlyActiveAddOnsAndExposeRevisionChanges(): void
+    {
+        $firstPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'first';
+        $secondPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'second';
+        File::ensureFile(
+            $firstPath . DIRECTORY_SEPARATOR . 'mapping' . DIRECTORY_SEPARATOR . 'capabilities.php',
+            "<?php return ['tools' => ['first']];",
+            true
+        );
+        File::ensureFile(
+            $secondPath . DIRECTORY_SEPARATOR . 'mapping' . DIRECTORY_SEPARATOR . 'capabilities.php',
+            "<?php return ['tools' => ['second']];",
+            true
+        );
+        $model = new FakeAddOnModel([
+            ['addon_id' => 1, 'name' => 'first', 'path' => $firstPath, 'is_active' => 1],
+            ['addon_id' => 2, 'name' => 'second', 'path' => $secondPath, 'is_active' => 0],
+        ]);
+        $manager = new TestableAddOnManager($model);
+
+        $initial = $manager->loadActivatedContributions('capabilities');
+        $manager->activate(2);
+        $activated = $manager->loadActivatedContributions('capabilities');
+
+        $this->assertTrue($initial['ok']);
+        $this->assertSame(1, $initial['total']);
+        $this->assertSame('first', $initial['results'][0]['addon']);
+        $this->assertSame(['tools' => ['first']], $initial['results'][0]['data']);
+        $this->assertSame(2, $activated['total']);
+        $this->assertNotSame($initial['revision'], $activated['revision']);
+    }
+
+    public function testPassiveContributionsReportMissingMalformedAndFailedFiles(): void
+    {
+        $missingPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'missing';
+        $malformedPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'malformed';
+        $failedPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'failed';
+        Path::ensureDir($missingPath);
+        File::ensureFile(
+            $malformedPath . DIRECTORY_SEPARATOR . 'mapping' . DIRECTORY_SEPARATOR . 'capabilities.php',
+            "<?php return ['factory' => static function (): void {}];",
+            true
+        );
+        File::ensureFile(
+            $failedPath . DIRECTORY_SEPARATOR . 'mapping' . DIRECTORY_SEPARATOR . 'capabilities.php',
+            "<?php throw new RuntimeException('Contribution failed.');",
+            true
+        );
+        $manager = new TestableAddOnManager(new FakeAddOnModel([
+            ['addon_id' => 1, 'name' => 'missing', 'path' => $missingPath, 'is_active' => 1],
+            ['addon_id' => 2, 'name' => 'malformed', 'path' => $malformedPath, 'is_active' => 1],
+            ['addon_id' => 3, 'name' => 'failed', 'path' => $failedPath, 'is_active' => 1],
+        ]));
+
+        $result = $manager->loadActivatedContributions('capabilities');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame(3, $result['total']);
+        $this->assertSame(1, $result['missing']);
+        $this->assertSame(2, $result['failed']);
+        $this->assertSame('missing', $result['results'][0]['status']);
+        $this->assertSame('failed', $result['results'][1]['status']);
+        $this->assertSame(\UnexpectedValueException::class, $result['results'][1]['exception']);
+        $this->assertSame('Contribution failed.', $result['results'][2]['error']);
+    }
+
+    public function testPassiveContributionNamesRejectPathTraversal(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+
+        $this->expectException(\InvalidArgumentException::class);
+        $manager->loadActivatedContributions('../capabilities');
+    }
+
     public function testPrimaryFilePrefersReachableConfiguredCandidate(): void
     {
         $manager = new TestableAddOnManager(new FakeAddOnModel());
