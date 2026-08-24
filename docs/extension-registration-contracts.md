@@ -19,12 +19,22 @@ Registrars implement `BlueFission\BlueCore\Contracts\IApplicationRegistrar` and 
 Add-on lifecycle managers implement `IAddOnLifecycleManager`:
 
 - `install($name, bool $installDependencies = false): array`
+- `installAll(bool $installDependencies = false): array`
 - `uninstall($addOnId, bool $removeDependencies = false): array`
 - `activate($addOnId): array`
+- `activateAll(): array`
 - `deactivate($addOnId): array`
+- `deactivateAll(): array`
 - `loadActivatedAddOns(?Application $application = null, ?RegistrationPlan $plan = null): array`
 
 Lifecycle methods return structured arrays so callers can compose results, log decisions, and avoid process termination.
+
+Bulk lifecycle operations normalize DevElation `Collection` and `Group`
+containers through the collection API before processing their rows. Each result
+retains the exact persisted row used for the operation, including identifiers,
+namespace separators, paths, primary files, and activation state. A malformed
+row or failed storage write makes the aggregate result fail while preserving
+the per-row diagnostic and leaving other rows visible to the caller.
 
 An active add-on primary file may return a callable registration factory. When
 the application and baseline registration plan are supplied together, BlueCore

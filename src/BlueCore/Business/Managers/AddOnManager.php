@@ -4,13 +4,14 @@ namespace BlueFission\BlueCore\Business\Managers;
 
 use BlueFission\Arr;
 use BlueFission\Connections\Database\MySQLLink;
+use BlueFission\Collections\ICollection;
+use BlueFission\BlueCore\Contracts\IAddOnLifecycleManager;
 use BlueFission\Data\FileSystem;
 use BlueFission\Data\Storage\Storage;
 use BlueFission\Func;
 use BlueFission\Net\HTTP;
 use BlueFission\Flag;
 use BlueFission\BlueCore\Registration\RegistrationPlan;
-use BlueFission\BlueCore\Contracts\IAddOnLifecycleManager;
 use BlueFission\Services\Application;
 use BlueFission\Services\Service;
 use BlueFission\Utils\Loader;
@@ -166,28 +167,46 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 
     public function activateAll(): array
     {
+        return $this->updateAllActivation(true);
+    }
+
+    public function deactivateAll(): array
+    {
+        return $this->updateAllActivation(false);
+    }
+
+    private function updateAllActivation(bool $active): array
+    {
         $addOns = $this->installedAddOns();
-        $results = [];
+        $results = Arr::make([]);
+        $action = $active ? 'activate' : 'deactivate';
+
         foreach ($addOns as $addOn) {
             $record = Arr::make($addOn);
-            if (Flag::parseBool($record->get('is_active'))) {
+            if (Flag::parseBool($record->get('is_active')) === $active) {
                 continue;
             }
 
             $addOnId = $record->get('addon_id');
             if (Val::isEmpty($addOnId)) {
-                $results[] = $this->failedLifecycleResult(
-                    'activate',
+                $failure = $this->failedLifecycleResult(
+                    $action,
                     '',
                     new \UnexpectedValueException('Persisted add-on row is missing addon_id.')
                 );
+                $failure['record'] = $record->toArray();
+                $results->push($failure);
                 continue;
             }
 
-            $results[] = $this->activate($addOnId);
+            $result = $active
+                ? $this->activate($addOnId)
+                : $this->deactivate($addOnId);
+            $result['record'] = $record->toArray();
+            $results->push($result);
         }
 
-        return $this->lifecycleBatchResult('activate_all', $results);
+        return $this->lifecycleBatchResult("{$action}_all", $results->toArray());
     }
 
     public function deactivate($addOnId): array
@@ -712,11 +731,41 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
     {
         $this->_model->clear();
         $this->_model->read();
+        $records = $this->_model->all();
 
-        return Arr::make(Arr::toArray($this->_model->all(), true))
-            ->map(fn ($addOn) => Arr::toArray($addOn, true))
+        if ($records instanceof ICollection) {
+            $records = $records->toArray(true);
+        } elseif ($records instanceof \Traversable) {
+            $records = iterator_to_array($records);
+        } else {
+            $records = Arr::toArray($records, true);
+        }
+
+        return Arr::make($records)
+            ->map(fn ($addOn) => $this->normalizeInstalledAddOn($addOn))
             ->values()
             ->toArray();
+    }
+
+    private function normalizeInstalledAddOn(mixed $addOn): array
+    {
+        if (Arr::is($addOn)) {
+            return $addOn;
+        }
+
+        if ($addOn instanceof ICollection) {
+            return $addOn->toArray(true);
+        }
+
+        if (Func::isCallable([$addOn, 'data'])) {
+            return Arr::toArray(Func::make([$addOn, 'data'])->call(), true);
+        }
+
+        if (is_object($addOn)) {
+            return get_object_vars($addOn);
+        }
+
+        return [];
     }
 
     protected function datasourceManager(): mixed
