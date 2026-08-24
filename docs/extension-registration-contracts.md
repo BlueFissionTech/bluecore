@@ -24,10 +24,18 @@ Add-on lifecycle managers implement `IAddOnLifecycleManager`:
 - `activate($addOnId): array`
 - `activateAll(): array`
 - `deactivate($addOnId): array`
+- `migrate($addOnId): array`
 - `deactivateAll(): array`
 - `loadActivatedAddOns(?Application $application = null, ?RegistrationPlan $plan = null): array`
 
 Lifecycle methods return structured arrays so callers can compose results, log decisions, and avoid process termination.
+
+`migrate()` refreshes the datasource structure of an already-installed add-on
+without installing dependencies or populating data. Migration history is
+filtered by the add-on batch before pending deltas are discovered. Successful
+deltas are idempotent on repeat; failed deltas stop the batch, retain their
+exception diagnostics, and report `retry_migrate` without marking the
+lifecycle operation complete.
 
 Bulk lifecycle operations normalize DevElation `Collection` and `Group`
 containers through the collection API before processing their rows. Each result

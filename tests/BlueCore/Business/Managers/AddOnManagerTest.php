@@ -628,6 +628,72 @@ PHP,
         $this->assertSame(1, $datasource->migrationRuns);
     }
 
+    public function testInstalledAddOnAppliesOnlyPendingMigrationsAndRepeatsAsNoOp(): void
+    {
+        $this->writeDefinition('demo');
+        $model = new FakeAddOnModel();
+        $datasource = new FakeDatasourceManager();
+        $datasource->publish('001_initial.php');
+        $manager = new TestableAddOnManager($model, $datasource);
+
+        $install = $manager->install('demo');
+        $datasource->publish('002_later.php');
+        $refresh = $manager->migrate($model->records[0]['addon_id']);
+        $repeat = $manager->migrate($model->records[0]['addon_id']);
+
+        $this->assertTrue($install['ok']);
+        $this->assertSame(1, $install['migrations']['applied']);
+        $this->assertTrue($refresh['ok']);
+        $this->assertTrue($refresh['changed']);
+        $this->assertSame('complete', $refresh['stage']);
+        $this->assertSame('002_later.php', $refresh['migrations']['results'][0]['name']);
+        $this->assertTrue($repeat['ok']);
+        $this->assertFalse($repeat['changed']);
+        $this->assertSame(0, $repeat['migrations']['total']);
+        $this->assertSame(1, $datasource->populationRuns);
+    }
+
+    public function testMigrationHistoryIsScopedToEachInstalledAddOn(): void
+    {
+        $this->writeDefinition('first');
+        $this->writeDefinition('second');
+        $datasource = new FakeDatasourceManager();
+        $datasource->publish('001_shared.php');
+        $manager = new TestableAddOnManager(new FakeAddOnModel(), $datasource);
+
+        $first = $manager->install('first');
+        $second = $manager->install('second');
+
+        $this->assertSame(1, $first['migrations']['applied']);
+        $this->assertSame(1, $second['migrations']['applied']);
+        $this->assertSame(['001_shared.php'], $datasource->appliedFor('first'));
+        $this->assertSame(['001_shared.php'], $datasource->appliedFor('second'));
+    }
+
+    public function testMigrationFailurePreventsSuccessAndRemainsRetryable(): void
+    {
+        $this->writeDefinition('demo');
+        $model = new FakeAddOnModel();
+        $datasource = new FakeDatasourceManager();
+        $datasource->publish('001_initial.php');
+        $manager = new TestableAddOnManager($model, $datasource);
+        $manager->install('demo');
+        $datasource->publish('002_retry.php');
+        $datasource->failOn('002_retry.php');
+
+        $failed = $manager->migrate($model->records[0]['addon_id']);
+        $retried = $manager->migrate($model->records[0]['addon_id']);
+
+        $this->assertFalse($failed['ok']);
+        $this->assertFalse($failed['changed']);
+        $this->assertSame('datasource', $failed['stage']);
+        $this->assertSame('retry_migrate', $failed['nextAction']);
+        $this->assertSame('Migration 002_retry.php failed.', $failed['error']);
+        $this->assertFalse($retried['ok']);
+        $this->assertSame('002_retry.php', $retried['migrations']['results'][0]['name']);
+        $this->assertSame(['001_initial.php'], $datasource->appliedFor('demo'));
+    }
+
     public function testFailedTeardownPreservesRegistrationForRetry(): void
     {
         $this->writeDefinition('demo');
@@ -893,6 +959,10 @@ class FakeAddOnModel
 class FakeDatasourceManager
 {
     public int $migrationRuns = 0;
+    public int $populationRuns = 0;
+    private array $published = [];
+    private array $applied = [];
+    private ?string $failedMigration = null;
 
     public function __construct(private bool $failRollback = false)
     {
@@ -906,13 +976,75 @@ class FakeDatasourceManager
     {
     }
 
-    public function runMigrations(string $batch): void
+    public function publish(string $migration): void
+    {
+        if (!\BlueFission\Arr::has($this->published, $migration, true)) {
+            $this->published[] = $migration;
+        }
+    }
+
+    public function failOn(?string $migration): void
+    {
+        $this->failedMigration = $migration;
+    }
+
+    public function appliedFor(string $batch): array
+    {
+        return $this->applied[$batch] ?? [];
+    }
+
+    public function runMigrations(string $batch): array
     {
         $this->migrationRuns++;
+        $applied = $this->applied[$batch] ?? [];
+        $pending = \BlueFission\Arr::make($this->published)
+            ->diff($applied)
+            ->values()
+            ->toArray();
+        $results = [];
+
+        foreach ($pending as $migration) {
+            $ok = $migration !== $this->failedMigration;
+            $results[] = [
+                'ok' => $ok,
+                'name' => $migration,
+                'status' => $ok ? 'applied' : 'failed',
+                'error' => $ok ? null : "Migration {$migration} failed.",
+            ];
+
+            if (!$ok) {
+                return [
+                    'ok' => false,
+                    'batch' => $batch,
+                    'changed' => false,
+                    'total' => \BlueFission\Arr::size($pending),
+                    'applied' => 0,
+                    'failed' => 1,
+                    'results' => $results,
+                    'nextAction' => 'retry_migrations',
+                    'error' => "Migration {$migration} failed.",
+                ];
+            }
+
+            $this->applied[$batch][] = $migration;
+        }
+
+        return [
+            'ok' => true,
+            'batch' => $batch,
+            'changed' => \BlueFission\Arr::isNotEmpty($pending),
+            'total' => \BlueFission\Arr::size($pending),
+            'applied' => \BlueFission\Arr::size($pending),
+            'failed' => 0,
+            'results' => $results,
+            'nextAction' => null,
+            'error' => null,
+        ];
     }
 
     public function populate(): void
     {
+        $this->populationRuns++;
     }
 
     public function revertBatch(string $batch): void

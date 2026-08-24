@@ -13,6 +13,7 @@ interface IAddOnLifecycleManager
     public function activate($addOnId): array;
     public function activateAll(): array;
     public function deactivate($addOnId): array;
+    public function migrate($addOnId): array;
     public function deactivateAll(): array;
     public function loadActivatedAddOns(
         ?Application $application = null,
