@@ -4,13 +4,14 @@ namespace BlueFission\BlueCore\Business\Managers;
 
 use BlueFission\Arr;
 use BlueFission\Connections\Database\MySQLLink;
+use BlueFission\Collections\ICollection;
+use BlueFission\BlueCore\Contracts\IAddOnLifecycleManager;
 use BlueFission\Data\FileSystem;
 use BlueFission\Data\Storage\Storage;
 use BlueFission\Func;
 use BlueFission\Net\HTTP;
 use BlueFission\Flag;
 use BlueFission\BlueCore\Registration\RegistrationPlan;
-use BlueFission\BlueCore\Contracts\IAddOnLifecycleManager;
 use BlueFission\Services\Application;
 use BlueFission\Services\Service;
 use BlueFission\Utils\Loader;
@@ -79,11 +80,29 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
         $datasource = $this->datasourceManager();
         $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
         $datasource->setGeneratorDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR);
-        ob_start();
-        $datasource->runMigrations($name);
-        $datasource->populate();
-        $result['messages'][] = ob_get_contents();
-        ob_end_clean();
+        $migrationResult = $datasource->runMigrations($data->name);
+        $result['migrations'] = $migrationResult;
+        if (Flag::isFalse(Arr::getPath($migrationResult, 'ok', false))) {
+            $result['ok'] = false;
+            $result['stage'] = 'datasource';
+            $result['nextAction'] = 'retry_install';
+            $result['error'] = Arr::getPath($migrationResult, 'error', 'Add-on migration failed.');
+            $result['messages'][] = $result['error'];
+
+            return $result;
+        }
+
+		$populationResult = $datasource->populate();
+		$result['population'] = $populationResult;
+		if (Flag::isFalse(Arr::getPath($populationResult, 'ok', false))) {
+			$result['ok'] = false;
+			$result['stage'] = 'datasource';
+			$result['nextAction'] = 'review_population_failure';
+			$result['error'] = Arr::getPath($populationResult, 'error', 'Add-on population failed.');
+			$result['messages'][] = $result['error'];
+
+			return $result;
+		}
 
         $hookResult = $this->callHook($addon, 'install');
         if (Arr::is($hookResult)) {
@@ -181,28 +200,46 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 
     public function activateAll(): array
     {
+        return $this->updateAllActivation(true);
+    }
+
+    public function deactivateAll(): array
+    {
+        return $this->updateAllActivation(false);
+    }
+
+    private function updateAllActivation(bool $active): array
+    {
         $addOns = $this->installedAddOns();
-        $results = [];
+        $results = Arr::make([]);
+        $action = $active ? 'activate' : 'deactivate';
+
         foreach ($addOns as $addOn) {
             $record = Arr::make($addOn);
-            if (Flag::parseBool($record->get('is_active'))) {
+            if (Flag::parseBool($record->get('is_active')) === $active) {
                 continue;
             }
 
             $addOnId = $record->get('addon_id');
             if (Val::isEmpty($addOnId)) {
-                $results[] = $this->failedLifecycleResult(
-                    'activate',
+                $failure = $this->failedLifecycleResult(
+                    $action,
                     '',
                     new \UnexpectedValueException('Persisted add-on row is missing addon_id.')
                 );
+                $failure['record'] = $record->toArray();
+                $results->push($failure);
                 continue;
             }
 
-            $results[] = $this->activate($addOnId);
+            $result = $active
+                ? $this->activate($addOnId)
+                : $this->deactivate($addOnId);
+            $result['record'] = $record->toArray();
+            $results->push($result);
         }
 
-        return $this->lifecycleBatchResult('activate_all', $results);
+        return $this->lifecycleBatchResult("{$action}_all", $results->toArray());
     }
 
     public function deactivate($addOnId): array
@@ -210,6 +247,40 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
         $this->_model->write(['addon_id' => $addOnId, 'is_active' => 0]);
 
         return $this->lifecycleResult('deactivate', (string)$addOnId, $this->_model->status(), $this->_model->query());
+    }
+
+    public function migrate($addOnId): array
+    {
+        $addOn = $this->getAddOnById($addOnId);
+        $result = $this->lifecycleResult('migrate', (string)$addOn->name);
+        $result['stage'] = 'datasource';
+
+        try {
+            $datasource = $this->datasourceManager();
+            $datasource->setDeltaDirectory(
+                $addOn->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR
+            );
+            $datasource->setGeneratorDirectory(
+                $addOn->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR
+            );
+            $migrationResult = $datasource->runMigrations($addOn->name);
+            $result['migrations'] = $migrationResult;
+            $result['ok'] = Flag::parseBool(Arr::getPath($migrationResult, 'ok', false));
+            $result['changed'] = Flag::parseBool(Arr::getPath($migrationResult, 'changed', false));
+            $result['stage'] = $result['ok'] ? 'complete' : 'datasource';
+            $result['nextAction'] = $result['ok'] ? null : 'retry_migrate';
+            $result['error'] = Arr::getPath($migrationResult, 'error');
+            if (Val::isNotEmpty($result['error'])) {
+                $result['messages'][] = $result['error'];
+            }
+        } catch (\Throwable $exception) {
+            $result['ok'] = false;
+            $result['nextAction'] = 'retry_migrate';
+            $result['error'] = $exception->getMessage();
+            $result['messages'][] = $exception->getMessage();
+        }
+
+        return $result;
     }
 
     public function showAllAddOns()
@@ -755,11 +826,41 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
     {
         $this->_model->clear();
         $this->_model->read();
+        $records = $this->_model->all();
 
-        return Arr::make(Arr::toArray($this->_model->all(), true))
-            ->map(fn ($addOn) => Arr::toArray($addOn, true))
+        if ($records instanceof ICollection) {
+            $records = $records->toArray(true);
+        } elseif ($records instanceof \Traversable) {
+            $records = iterator_to_array($records);
+        } else {
+            $records = Arr::toArray($records, true);
+        }
+
+        return Arr::make($records)
+            ->map(fn ($addOn) => $this->normalizeInstalledAddOn($addOn))
             ->values()
             ->toArray();
+    }
+
+    private function normalizeInstalledAddOn(mixed $addOn): array
+    {
+        if (Arr::is($addOn)) {
+            return $addOn;
+        }
+
+        if ($addOn instanceof ICollection) {
+            return $addOn->toArray(true);
+        }
+
+        if (Func::isCallable([$addOn, 'data'])) {
+            return Arr::toArray(Func::make([$addOn, 'data'])->call(), true);
+        }
+
+        if (is_object($addOn)) {
+            return get_object_vars($addOn);
+        }
+
+        return [];
     }
 
     protected function datasourceManager(): mixed
@@ -812,6 +913,8 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             'messages' => $ok ? [] : ['Add-on registration could not be updated.'],
             'dependencies' => [],
             'hooks' => [],
+			'migrations' => [],
+			'population' => [],
             'modelStatus' => $modelStatus,
             'query' => $query,
         ])->toArray();
