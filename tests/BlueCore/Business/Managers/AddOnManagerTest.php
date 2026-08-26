@@ -325,6 +325,33 @@ class AddOnManagerTest extends TestCase
         $this->assertSame(1, $result['failed']);
     }
 
+    public function testInstallAllDiscoversApplicationAddOnAndRunsItsDatasourceStage(): void
+    {
+        $this->writeDefinition('applicationowned');
+        $model = new FakeAddOnModel();
+        $datasource = new FakeDatasourceManager();
+        $manager = new TestableAddOnManager($model, $datasource);
+
+        $result = $manager->installAll();
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(1, $result['total']);
+        $this->assertSame(1, $result['succeeded']);
+        $this->assertSame(1, $datasource->migrationRuns);
+        $this->assertSame(
+            Path::normalize(
+                self::$root
+                . DIRECTORY_SEPARATOR . 'addons'
+                . DIRECTORY_SEPARATOR . 'applicationowned'
+                . DIRECTORY_SEPARATOR . 'datasources'
+                . DIRECTORY_SEPARATOR . 'structure'
+                . DIRECTORY_SEPARATOR
+            ),
+            $datasource->deltaDirectories[0]
+        );
+        $this->assertCount(1, $model->records);
+    }
+
     public function testPassiveContributionsIncludeOnlyActiveAddOnsAndExposeRevisionChanges(): void
     {
         $firstPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'first';
@@ -1147,6 +1174,8 @@ class FakeDatasourceManager
 {
     public int $migrationRuns = 0;
     public int $populationRuns = 0;
+    public array $deltaDirectories = [];
+    public array $generatorDirectories = [];
     private array $published = [];
     private array $applied = [];
     private ?string $failedMigration = null;
@@ -1158,10 +1187,12 @@ class FakeDatasourceManager
 
     public function setDeltaDirectory(string $directory): void
     {
+        $this->deltaDirectories[] = Path::normalize($directory);
     }
 
     public function setGeneratorDirectory(string $directory): void
     {
+        $this->generatorDirectories[] = Path::normalize($directory);
     }
 
     public function publish(string $migration): void

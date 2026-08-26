@@ -2,6 +2,7 @@
 
 namespace BlueFission\Tests\Utils;
 
+use BlueFission\Func;
 use BlueFission\Utils\Path;
 use BlueFission\Utils\File;
 use PHPUnit\Framework\TestCase;
@@ -77,6 +78,63 @@ class PathTest extends TestCase
         $this->assertFalse($readiness['readable']);
         $this->assertFalse($readiness['writable']);
         $this->assertSame('not_directory', $readiness['reason']);
+    }
+
+    public function testProjectPathResolutionPrefersExistingApplicationDirectoryBeforeHostFallback(): void
+    {
+        $applicationRoot = Path::ensureDir(
+            $this->tmpDir . DIRECTORY_SEPARATOR . 'application'
+        );
+        $projectRoot = Path::ensureDir(
+            $this->tmpDir . DIRECTORY_SEPARATOR . 'project'
+        );
+        $applicationAddOns = Path::ensureDir(
+            $applicationRoot . DIRECTORY_SEPARATOR . 'addons'
+        );
+        $resolver = new Func(
+            static fn (string $path): string => Path::normalize(
+                $projectRoot . DIRECTORY_SEPARATOR . $path
+            )
+        );
+
+        $resolved = Path::resolveProjectPath(
+            'addons',
+            $applicationRoot,
+            $projectRoot,
+            $resolver
+        );
+
+        $this->assertSame(Path::normalize($applicationAddOns), $resolved);
+    }
+
+    public function testProjectPathResolutionPreservesHostFallbackWhenApplicationCandidateIsMissing(): void
+    {
+        $applicationRoot = Path::ensureDir(
+            $this->tmpDir . DIRECTORY_SEPARATOR . 'application'
+        );
+        $projectRoot = Path::ensureDir(
+            $this->tmpDir . DIRECTORY_SEPARATOR . 'project'
+        );
+        $customRoot = Path::ensureDir(
+            $this->tmpDir . DIRECTORY_SEPARATOR . 'custom'
+        );
+        $resolver = new Func(
+            static fn (string $path): string => Path::normalize(
+                $customRoot . DIRECTORY_SEPARATOR . $path
+            )
+        );
+
+        $resolved = Path::resolveProjectPath(
+            'addons',
+            $applicationRoot,
+            $projectRoot,
+            $resolver
+        );
+
+        $this->assertSame(
+            Path::normalize($customRoot . DIRECTORY_SEPARATOR . 'addons'),
+            $resolved
+        );
     }
 
     private function removeDir($dir): void
