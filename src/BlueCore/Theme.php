@@ -2,7 +2,9 @@
 namespace BlueFission\BlueCore;
 
 use BlueFission\Arr;
+use BlueFission\Data\FileSystem;
 use BlueFission\Str;
+use BlueFission\Utils\Path;
 
 class Theme 
 {
@@ -16,9 +18,13 @@ class Theme
 
 		$nameParts = Arr::toArray(Str::split($name, '/'), true);
 		$directory = $nameParts[0] ?? "";
-		$appThemeDir = resolve_path('resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR);
+		$appThemeDir = $this->resolveDirectory(
+			'resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR
+		);
 
-		$addonThemeDir = resolve_path('addons'.DIRECTORY_SEPARATOR.$directory.DIRECTORY_SEPARATOR.'resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR);
+		$addonThemeDir = $this->resolveDirectory(
+			'addons'.DIRECTORY_SEPARATOR.$directory.DIRECTORY_SEPARATOR.'resource'.DIRECTORY_SEPARATOR.'markup'.DIRECTORY_SEPARATOR
+		);
 
 		$path = $appThemeDir.Str::lower($name).DIRECTORY_SEPARATOR;
 
@@ -29,5 +35,32 @@ class Theme
 		}
 
 		$this->location = $location ? $location : $path;
+	}
+
+	private function resolveDirectory(string $relativePath): string
+	{
+		$normalizedRelativePath = Path::normalize($relativePath);
+		$applicationCandidate = Path::normalize(
+			(string)APP_ROOT
+			.DIRECTORY_SEPARATOR
+			.$normalizedRelativePath
+		);
+
+		if (FileSystem::directoryExists($applicationCandidate)) {
+			return $this->withDirectorySeparator($applicationCandidate);
+		}
+
+		$resolved = Path::normalize((string)resolve_path($normalizedRelativePath));
+
+		return $this->withDirectorySeparator($resolved);
+	}
+
+	private function withDirectorySeparator(string $path): string
+	{
+		$normalized = Path::normalize($path);
+
+		return Str::endsWith($normalized, DIRECTORY_SEPARATOR)
+			? $normalized
+			: $normalized.DIRECTORY_SEPARATOR;
 	}
 }
