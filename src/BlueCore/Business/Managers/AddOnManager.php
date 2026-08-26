@@ -194,9 +194,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 
     public function activate($addOnId): array
     {
-        $this->_model->write(['addon_id' => $addOnId, 'is_active' => 1]);
-
-        return $this->lifecycleResult('activate', (string)$addOnId, $this->_model->status(), $this->_model->query());
+        return $this->updateActivation($addOnId, true);
     }
 
     public function activateAll(): array
@@ -245,9 +243,51 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 
     public function deactivate($addOnId): array
     {
-        $this->_model->write(['addon_id' => $addOnId, 'is_active' => 0]);
+        return $this->updateActivation($addOnId, false);
+    }
 
-        return $this->lifecycleResult('deactivate', (string)$addOnId, $this->_model->status(), $this->_model->query());
+    private function updateActivation($addOnId, bool $active): array
+    {
+        $action = $active ? 'activate' : 'deactivate';
+        $this->_model->write([
+            'addon_id' => $addOnId,
+            'is_active' => $active ? 1 : 0,
+        ]);
+
+        $result = $this->lifecycleResult(
+            $action,
+            (string)$addOnId,
+            $this->_model->status(),
+            $this->_model->query()
+        );
+
+        if (Flag::isFalse($result['ok'])) {
+            return $result;
+        }
+
+        $this->_model->clear()->read(['addon_id' => $addOnId]);
+        $record = Arr::make((array)$this->_model->data());
+        $verified = $this->_model->status() === Storage::STATUS_SUCCESS
+            && $record->hasKey('is_active')
+            && Flag::parseBool($record->get('is_active')) === $active;
+
+        $result['verification'] = Arr::make([
+            'ok' => $verified,
+            'is_active' => $record->get('is_active'),
+            'modelStatus' => $this->_model->status(),
+        ])->toArray();
+
+        if (Flag::isFalse($verified)) {
+            $message = 'Add-on activation state was not persisted.';
+            $result['ok'] = false;
+            $result['changed'] = false;
+            $result['stage'] = 'verification';
+            $result['nextAction'] = "retry_{$action}";
+            $result['error'] = $message;
+            $result['messages'] = [$message];
+        }
+
+        return $result;
     }
 
     public function migrate($addOnId): array
