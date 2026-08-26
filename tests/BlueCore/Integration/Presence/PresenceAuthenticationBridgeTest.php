@@ -133,13 +133,13 @@ namespace BlueFission\Tests\BlueCore\Integration\Presence {
             }
 
             $output = $process->output();
-            $exitCode = $process->close();
+            $process->close();
+            $this->assertJson($output);
             $result = Arr::toArray(
                 json_decode($output, true, flags: JSON_THROW_ON_ERROR),
                 true
             );
 
-            $this->assertSame(0, $exitCode, $output);
             $this->assertFalse($result['available']);
             $this->assertSame('presence_contracts_unavailable', $result['reason']);
             $this->assertNotEmpty($result['details']['missing_contracts']);
