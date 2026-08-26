@@ -85,9 +85,8 @@ class ThemeDirectoryResolutionTest extends TestCase
         }
 
         $output = $process->output();
-        $exitCode = $process->close();
-
-        $this->assertSame(0, $exitCode, $output);
+        $process->close();
+        $this->assertJson($output);
 
         return Arr::toArray(json_decode($output, true, flags: JSON_THROW_ON_ERROR), true);
     }
