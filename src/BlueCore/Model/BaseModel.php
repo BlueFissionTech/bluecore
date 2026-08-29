@@ -103,6 +103,10 @@ class BaseModel extends Obj implements IData, JsonSerializable {
 	 */
 	public function field(string $field, $value = null): mixed
 	{
+		if (Val::isNotNull($value) && Val::isEmpty($value)) {
+			$value = Val::make($value);
+		}
+
 		return $this->_dataObject->field($field, $value);
 	}
 
