@@ -4,7 +4,9 @@ namespace BlueFission\Utils;
 
 use BlueFission\Arr;
 use BlueFission\Data\Directory;
+use BlueFission\Data\FileSystem;
 use BlueFission\Flag;
+use BlueFission\Func;
 use BlueFission\Str;
 use BlueFission\Val;
 
@@ -38,6 +40,50 @@ class Path extends Directory
     public static function parentPath($path)
     {
         return dirname(self::normalize($path));
+    }
+
+    public static function resolveProjectPath(
+        $pathInProject,
+        ?string $applicationRoot = null,
+        ?string $legacyProjectRoot = null,
+        ?Func $fallbackResolver = null
+    ): string {
+        $applicationRoot ??= defined('APP_ROOT') ? (string)constant('APP_ROOT') : (string)getcwd();
+        $legacyProjectRoot ??= defined('PROJECT_ROOT')
+            ? (string)constant('PROJECT_ROOT')
+            : $applicationRoot;
+
+        $relativePath = self::normalize((string)$pathInProject);
+        $candidate = self::normalize(
+            $applicationRoot . DIRECTORY_SEPARATOR . $relativePath
+        );
+        $fallback = self::normalize(
+            $legacyProjectRoot . DIRECTORY_SEPARATOR . $relativePath
+        );
+        $hasWildcard = Str::matchPattern($relativePath, '/[*?\[]/');
+
+        if (!$hasWildcard && (
+            FileSystem::fileExists($candidate)
+            || FileSystem::directoryExists($candidate)
+        )) {
+            return $candidate;
+        }
+
+        if ($hasWildcard) {
+            $matches = glob($candidate);
+            if (!Flag::isFalse($matches) && Arr::isNotEmpty($matches)) {
+                return $candidate;
+            }
+        }
+
+        if (Val::isNotNull($fallbackResolver)) {
+            $resolved = self::normalize((string)$fallbackResolver->call($relativePath));
+            if (Val::isNotEmpty($resolved)) {
+                return $resolved;
+            }
+        }
+
+        return $fallback;
     }
 
     public static function readiness($path): array
