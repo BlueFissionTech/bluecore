@@ -39,48 +39,86 @@ class InstallationExecutorTest extends TestCase
         rmdir($this->checkpointDirectory);
     }
 
-    public function testPlanMakesDefaultsSkipsAndValidationExplicit(): void
+    public function testPlanPreservesOpaqueHostContextWithoutUniversalFields(): void
     {
-        $executor = $this->executor();
-        $invalid = $executor->prepare([]);
+        $executor = new InstallationExecutor();
+        $context = [
+            'host_defined' => ['mode' => 'custom'],
+            'capabilities' => ['registration'],
+        ];
 
-        $this->assertSame(InstallationPlan::STATUS_DRAFT, $invalid->status());
-        $this->assertSame('required', $invalid->diagnostics()[0]['reason']);
+        $plan = $executor->prepare($context, 'opaque-plan');
 
-        $plan = $executor->prepare([
-            'project_name' => 'Materia Host',
-            'values' => ['environment' => 'production'],
-            'defaults' => ['region' => 'global', 'environment' => 'local'],
-            'skips' => ['population'],
-        ]);
-
-        $this->assertSame(InstallationPlan::STATUS_REVIEW_READY, $plan->status());
-        $this->assertSame('production', $plan->values()['environment']);
-        $this->assertSame('global', $plan->values()['region']);
-        $this->assertTrue($plan->skipped('population'));
+        $this->assertSame('opaque-plan', $plan->id());
+        $this->assertSame(InstallationPlan::STATUS_READY, $plan->status());
+        $this->assertSame($context, $plan->context());
+        $this->assertSame([], $plan->diagnostics());
         $this->assertTrue($plan->is($plan->behaviorState()));
+        $this->assertArrayNotHasKey('project_name', $plan->toArray());
+        $this->assertArrayNotHasKey('permissions', $plan->toArray());
+        $this->assertArrayNotHasKey('skips', $plan->toArray());
     }
 
-    public function testExecutionRequiresPermissionReviewBeforeSideEffects(): void
+    public function testHostValidatorOwnsContextRequirements(): void
     {
-        $calls = 0;
-        $executor = $this->executor()
-            ->stage('packages', function () use (&$calls): array {
-                $calls++;
-                return ['ok' => true, 'changed' => true];
-            }, ['write_project']);
-        $plan = $executor->prepare(['project_name' => 'Guarded Host']);
+        $executor = (new InstallationExecutor())->validator(
+            fn (array $context): array => Arr::hasKey($context, 'definition')
+                ? []
+                : [[
+                    'field' => 'definition',
+                    'reason' => 'required_by_host',
+                    'message' => 'A host definition is required.',
+                ]]
+        );
+
+        $invalid = $executor->prepare([]);
+        $valid = $executor->prepare(['definition' => ['type' => 'application']]);
+
+        $this->assertSame(InstallationPlan::STATUS_DRAFT, $invalid->status());
+        $this->assertSame('required_by_host', $invalid->diagnostics()[0]['reason']);
+        $this->assertSame(InstallationPlan::STATUS_READY, $valid->status());
+    }
+
+    public function testApprovalGateIsOptionalAndStoresOpaqueHostEvidence(): void
+    {
+        $unguardedCalls = 0;
+        $unguarded = (new InstallationExecutor())
+            ->stage('operation', function () use (&$unguardedCalls): bool {
+                $unguardedCalls++;
+                return true;
+            });
+        $unguardedResult = $unguarded->execute($unguarded->prepare());
+
+        $this->assertTrue($unguardedResult['ok']);
+        $this->assertSame(1, $unguardedCalls);
+
+        $guardedCalls = 0;
+        $guarded = (new InstallationExecutor())
+            ->requireApproval()
+            ->stage('operation', function () use (&$guardedCalls): bool {
+                $guardedCalls++;
+                return true;
+            }, ['owner' => 'host']);
+        $plan = $guarded->prepare();
 
         try {
-            $executor->execute($plan);
-            $this->fail('Execution should require approval.');
+            $guarded->execute($plan);
+            $this->fail('Execution should require host approval when the gate is enabled.');
         } catch (\LogicException $exception) {
-            $this->assertSame('Installation execution requires explicit approval.', $exception->getMessage());
+            $this->assertSame('Installation execution requires host approval.', $exception->getMessage());
         }
-        $this->assertSame(0, $calls);
+        $this->assertSame(0, $guardedCalls);
+        $this->assertSame(['name' => 'operation', 'metadata' => ['owner' => 'host']], $guarded->stages()[0]);
 
-        $this->expectException(\LogicException::class);
-        $plan->approve([]);
+        $plan->approve(['decision_id' => 'host-decision-1']);
+        $this->assertSame(
+            ['decision_id' => 'host-decision-1'],
+            Arr::getPath($plan->toArray(), 'approval_evidence')
+        );
+        $result = $guarded->execute($plan);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(1, $guardedCalls);
     }
 
     public function testCompletedStagesAreNotRepeatedDuringCheckpointResume(): void
@@ -95,16 +133,15 @@ class InstallationExecutorTest extends TestCase
                     'changed' => true,
                     'evidence' => ['owner' => 'package_installer'],
                 ];
-            }, ['write_project'])
+            })
             ->stage('migrations', function () use (&$migrationCalls): array {
                 $migrationCalls++;
                 return $migrationCalls === 1
                     ? ['ok' => false, 'error' => 'temporary failure']
                     : ['ok' => true, 'changed' => true, 'evidence' => ['applied' => 2]];
-            }, ['write_database']);
+            });
 
-        $plan = $executor->prepare(['project_name' => 'Resumable Host']);
-        $plan->approve(['write_project', 'write_database']);
+        $plan = $executor->prepare(['host_defined' => true]);
         $first = $executor->execute($plan);
 
         $this->assertFalse($first['ok']);
@@ -124,28 +161,27 @@ class InstallationExecutorTest extends TestCase
         $this->assertSame(2, Arr::getPath($second, 'outcomes.migrations.evidence.applied'));
     }
 
-    public function testExplicitlySkippedStageProducesStructuredEvidence(): void
+    public function testHostStageCanReturnStructuredSkipEvidence(): void
     {
-        $calls = 0;
-        $executor = $this->executor()->stage('population', function () use (&$calls): bool {
-            $calls++;
-            return true;
-        });
-        $plan = $executor->prepare([
-            'project_name' => 'Skip Host',
-            'skips' => ['population'],
+        $executor = (new InstallationExecutor())->stage('optional', fn (): array => [
+            'ok' => true,
+            'changed' => false,
+            'skipped' => true,
+            'evidence' => ['reason' => 'host_policy'],
         ]);
-        $plan->approve([]);
 
-        $result = $executor->execute($plan);
+        $result = $executor->execute($executor->prepare());
 
         $this->assertTrue($result['ok']);
-        $this->assertSame(0, $calls);
-        $this->assertTrue(Arr::getPath($result, 'outcomes.population.skipped'));
-        $this->assertSame(
-            'explicit_skip',
-            Arr::getPath($result, 'outcomes.population.evidence.reason')
-        );
+        $this->assertTrue(Arr::getPath($result, 'outcomes.optional.skipped'));
+        $this->assertSame('host_policy', Arr::getPath($result, 'outcomes.optional.evidence.reason'));
+    }
+
+    public function testResumeRequiresAnExplicitCheckpointStore(): void
+    {
+        $this->expectException(\LogicException::class);
+
+        (new InstallationExecutor())->resume('missing');
     }
 
     private function executor(): InstallationExecutor

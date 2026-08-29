@@ -7,7 +7,6 @@ use BlueFission\Behavioral\Behaviors\State;
 use BlueFission\Collections\Collection;
 use BlueFission\Date;
 use BlueFission\Flag;
-use BlueFission\Net\HTTP;
 use BlueFission\Obj;
 use BlueFission\Str;
 use BlueFission\Val;
@@ -16,7 +15,7 @@ class InstallationPlan extends Obj
 {
     public const VERSION = 1;
     public const STATUS_DRAFT = 'draft';
-    public const STATUS_REVIEW_READY = 'review_ready';
+    public const STATUS_READY = 'ready';
     public const STATUS_APPROVED = 'approved';
     public const STATUS_EXECUTING = 'executing';
     public const STATUS_COMPLETED = 'completed';
@@ -24,77 +23,40 @@ class InstallationPlan extends Obj
 
     private const BEHAVIORS = [
         self::STATUS_DRAFT => 'IsInstallationDraft',
-        self::STATUS_REVIEW_READY => 'IsInstallationReviewReady',
+        self::STATUS_READY => 'IsInstallationReady',
         self::STATUS_APPROVED => 'IsInstallationApproved',
         self::STATUS_EXECUTING => 'IsInstallationExecuting',
         self::STATUS_COMPLETED => 'IsInstallationCompleted',
         self::STATUS_FAILED => 'IsInstallationFailed',
     ];
 
-    public function __construct(array $packet = [])
+    public function __construct(array $context = [], ?string $id = null)
     {
         parent::__construct();
 
-        $values = Arr::make(Arr::getPath($packet, 'values', []));
-        $projectName = Str::make((string)Arr::getPath(
-            $packet,
-            'project_name',
-            $values->get('project_name', '')
-        ))->trim()->val();
-        if (Val::isNotEmpty($projectName)) {
-            $values->set('project_name', $projectName);
+        $planId = Str::make((string)$id)->trim()->val();
+        if (Val::isEmpty($planId)) {
+            $planId = Str::make('installation-')->append(Str::rand('', 16))->val();
         }
 
-        $diagnostics = new Collection();
-        $version = (int)Arr::getPath($packet, 'version', self::VERSION);
-        if ($version !== self::VERSION) {
-            $diagnostics->add([
-                'field' => 'version',
-                'reason' => 'unsupported_version',
-                'message' => 'The installation plan version is not supported.',
-            ]);
-        }
-        if (Val::isEmpty($projectName)) {
-            $diagnostics->add([
-                'field' => 'project_name',
-                'reason' => 'required',
-                'message' => 'Project name is required.',
-            ]);
-        }
-
-        $id = Str::make((string)Arr::getPath($packet, 'id', ''))->trim()->val();
-        if (Val::isEmpty($id)) {
-            $slug = Str::make(Val::isEmpty($projectName) ? 'installation' : $projectName)->slugify();
-            $fingerprint = Str::make((string)HTTP::jsonEncode($packet))->encrypt('sha1')->val();
-            $id = Str::make((string)$slug)->append('-')->append(Str::sub($fingerprint, 0, 12))->val();
-        }
-
-        $status = Arr::isEmpty($diagnostics->toArray())
-            ? self::STATUS_REVIEW_READY
-            : self::STATUS_DRAFT;
         $now = Date::now()->val();
-
         $this->_data = Arr::make([
-            'id' => $id,
+            'id' => $planId,
             'version' => self::VERSION,
-            'project_name' => $projectName,
-            'values' => $values->toArray(),
-            'defaults' => Arr::make(Arr::getPath($packet, 'defaults', []))->toArray(),
-            'skips' => Arr::make(Arr::getPath($packet, 'skips', []))->values()->unique()->toArray(),
-            'permissions' => Arr::make(Arr::getPath($packet, 'permissions', []))->values()->unique()->toArray(),
-            'granted_permissions' => Arr::make(Arr::getPath($packet, 'granted_permissions', []))->values()->unique()->toArray(),
-            'diagnostics' => $diagnostics->toArray(),
-            'status' => $status,
-            'checkpoints' => Arr::make(Arr::getPath($packet, 'checkpoints', []))->toArray(),
-            'outcomes' => Arr::make(Arr::getPath($packet, 'outcomes', []))->toArray(),
-            'created_at' => Arr::getPath($packet, 'created_at', $now),
+            'context' => Arr::make($context)->toArray(),
+            'diagnostics' => [],
+            'status' => self::STATUS_READY,
+            'approval_evidence' => [],
+            'checkpoints' => [],
+            'outcomes' => [],
+            'created_at' => $now,
             'updated_at' => $now,
-            'approved_at' => Arr::getPath($packet, 'approved_at'),
-            'completed_at' => Arr::getPath($packet, 'completed_at'),
-            'failure' => Arr::getPath($packet, 'failure'),
+            'approved_at' => null,
+            'completed_at' => null,
+            'failure' => null,
         ]);
 
-        $this->transition($status);
+        $this->transition(self::STATUS_READY, false);
     }
 
     protected function init()
@@ -107,11 +69,36 @@ class InstallationPlan extends Obj
 
     public static function restore(array $checkpoint): self
     {
-        $plan = new self($checkpoint);
-        $status = (string)Arr::getPath($checkpoint, 'status', '');
-        if (Arr::hasKey(self::BEHAVIORS, $status)) {
-            $plan->transition($status);
+        $version = (int)Arr::getPath($checkpoint, 'version', self::VERSION);
+        if ($version !== self::VERSION) {
+            throw new \InvalidArgumentException('The installation checkpoint version is not supported.');
         }
+
+        $plan = new self(
+            Arr::make(Arr::getPath($checkpoint, 'context', []))->toArray(),
+            (string)Arr::getPath($checkpoint, 'id', '')
+        );
+        $status = (string)Arr::getPath($checkpoint, 'status', self::STATUS_READY);
+        if (!Arr::hasKey(self::BEHAVIORS, $status)) {
+            $status = self::STATUS_READY;
+        }
+
+        $plan->_data = Arr::make([
+            'id' => $plan->id(),
+            'version' => self::VERSION,
+            'context' => Arr::make(Arr::getPath($checkpoint, 'context', []))->toArray(),
+            'diagnostics' => Arr::make(Arr::getPath($checkpoint, 'diagnostics', []))->toArray(),
+            'status' => $status,
+            'approval_evidence' => Arr::make(Arr::getPath($checkpoint, 'approval_evidence', []))->toArray(),
+            'checkpoints' => Arr::make(Arr::getPath($checkpoint, 'checkpoints', []))->toArray(),
+            'outcomes' => Arr::make(Arr::getPath($checkpoint, 'outcomes', []))->toArray(),
+            'created_at' => Arr::getPath($checkpoint, 'created_at', Date::now()->val()),
+            'updated_at' => Arr::getPath($checkpoint, 'updated_at', Date::now()->val()),
+            'approved_at' => Arr::getPath($checkpoint, 'approved_at'),
+            'completed_at' => Arr::getPath($checkpoint, 'completed_at'),
+            'failure' => Arr::getPath($checkpoint, 'failure'),
+        ]);
+        $plan->transition($status, false);
 
         return $plan;
     }
@@ -131,44 +118,30 @@ class InstallationPlan extends Obj
         return self::BEHAVIORS[$this->status()];
     }
 
+    public function context(): array
+    {
+        return Arr::make($this->_data->get('context', []))->toArray();
+    }
+
     public function diagnostics(): array
     {
         return Arr::make($this->_data->get('diagnostics', []))->toArray();
     }
 
-    public function values(): array
+    public function applyDiagnostics(array $diagnostics): self
     {
-        return Arr::make($this->_data->get('values', []))
-            ->merge($this->_data->get('defaults', []))
-            ->merge($this->_data->get('values', []))
-            ->toArray();
-    }
-
-    public function skipped(string $stage): bool
-    {
-        return Arr::has($this->_data->get('skips', []), $stage, true);
-    }
-
-    public function requestPermissions(array $permissions): self
-    {
-        $requested = Arr::make($this->_data->get('permissions', []))
-            ->merge($permissions)
-            ->values()
-            ->unique()
-            ->toArray();
-        $this->_data->set('permissions', $requested);
-        $this->touch();
+        $normalized = (new Collection($diagnostics))->toArray();
+        $this->_data->set('diagnostics', $normalized);
+        $this->transition(
+            Arr::isEmpty($normalized) ? self::STATUS_READY : self::STATUS_DRAFT
+        );
 
         return $this;
     }
 
-    public function approve(array $grantedPermissions): self
+    public function approve(array $evidence = []): self
     {
-        if (!Arr::has(
-            [self::STATUS_REVIEW_READY, self::STATUS_FAILED],
-            $this->status(),
-            true
-        )) {
+        if ($this->status() !== self::STATUS_READY) {
             throw new \LogicException('Installation plan is not ready for approval.');
         }
 
@@ -176,15 +149,7 @@ class InstallationPlan extends Obj
             throw new \LogicException('An invalid installation plan cannot be approved.');
         }
 
-        $granted = Arr::make($grantedPermissions)->values()->unique()->toArray();
-        $missing = Arr::make($this->_data->get('permissions', []))->diff($granted)->toArray();
-        if (Arr::isNotEmpty($missing)) {
-            throw new \LogicException(
-                'Installation permissions require review: '.Arr::make($missing)->join(', ')->val()
-            );
-        }
-
-        $this->_data->set('granted_permissions', $granted);
+        $this->_data->set('approval_evidence', Arr::make($evidence)->toArray());
         $this->_data->set('approved_at', Date::now()->val());
         $this->_data->set('failure', null);
         $this->transition(self::STATUS_APPROVED);
@@ -198,13 +163,25 @@ class InstallationPlan extends Obj
             throw new \LogicException('Only a failed installation plan can be retried.');
         }
 
-        return $this->approve($this->_data->get('granted_permissions', []));
+        $this->_data->set('failure', null);
+        $this->_data->set('approval_evidence', []);
+        $this->_data->set('approved_at', null);
+        $this->transition(self::STATUS_READY);
+
+        return $this;
     }
 
-    public function start(): self
+    public function start(bool $approvalRequired = false): self
     {
-        if ($this->status() !== self::STATUS_APPROVED) {
-            throw new \LogicException('Installation execution requires explicit approval.');
+        $allowed = $approvalRequired
+            ? [self::STATUS_APPROVED]
+            : [self::STATUS_READY, self::STATUS_APPROVED];
+        if (!Arr::has($allowed, $this->status(), true)) {
+            throw new \LogicException(
+                $approvalRequired
+                    ? 'Installation execution requires host approval.'
+                    : 'Installation plan is not ready for execution.'
+            );
         }
 
         $this->transition(self::STATUS_EXECUTING);
@@ -233,8 +210,7 @@ class InstallationPlan extends Obj
     {
         $checkpoint = Arr::getPath($this->_data->get('checkpoints', []), $stage, []);
 
-        return Flag::make(Arr::getPath($checkpoint, 'ok', false))->parseBool()
-            && !Flag::make(Arr::getPath($checkpoint, 'skipped', false))->parseBool();
+        return Flag::make(Arr::getPath($checkpoint, 'ok', false))->parseBool();
     }
 
     public function complete(): self
@@ -253,14 +229,16 @@ class InstallationPlan extends Obj
         return $this;
     }
 
-    private function transition(string $status): void
+    private function transition(string $status, bool $touch = true): void
     {
         foreach (self::BEHAVIORS as $behavior) {
             $this->halt($behavior);
         }
         $this->halt(State::DRAFT);
         $this->_data->set('status', $status);
-        $this->touch();
+        if ($touch) {
+            $this->touch();
+        }
         $this->perform(self::BEHAVIORS[$status]);
     }
 

@@ -13,13 +13,29 @@ use BlueFission\Val;
 class InstallationExecutor
 {
     private Collection $stages;
+    private ?Func $validator = null;
+    private bool $approvalRequired = false;
 
-    public function __construct(private IInstallationCheckpointStore $checkpoints)
+    public function __construct(private ?IInstallationCheckpointStore $checkpoints = null)
     {
         $this->stages = new Collection();
     }
 
-    public function stage(string $name, callable|Func $operation, array $permissions = []): self
+    public function validator(callable|Func $validator): self
+    {
+        $this->validator = $validator instanceof Func ? $validator : Func::make($validator);
+
+        return $this;
+    }
+
+    public function requireApproval(bool $required = true): self
+    {
+        $this->approvalRequired = $required;
+
+        return $this;
+    }
+
+    public function stage(string $name, callable|Func $operation, array $metadata = []): self
     {
         $name = Str::make($name)->trim()->val();
         if (Val::isEmpty($name)) {
@@ -29,28 +45,43 @@ class InstallationExecutor
         $this->stages->add([
             'name' => $name,
             'operation' => $operation instanceof Func ? $operation : Func::make($operation),
-            'permissions' => Arr::make($permissions)->values()->unique()->toArray(),
+            'metadata' => Arr::make($metadata)->toArray(),
         ], $name);
 
         return $this;
     }
 
-    public function prepare(array $packet): InstallationPlan
+    public function stages(): array
     {
-        $plan = new InstallationPlan($packet);
-        $permissions = Arr::make([]);
+        $definitions = new Collection();
         foreach ($this->stages as $stage) {
-            $stage = Arr::make($stage);
-            $permissions->merge($stage->get('permissions', []));
+            $record = Arr::make($stage);
+            $definitions->add([
+                'name' => $record->get('name'),
+                'metadata' => Arr::make($record->get('metadata', []))->toArray(),
+            ]);
         }
-        $plan->requestPermissions($permissions->values()->unique()->toArray());
-        $this->checkpoints->save($plan->id(), $plan->toArray());
+
+        return $definitions->toArray();
+    }
+
+    public function prepare(array $context = [], ?string $planId = null): InstallationPlan
+    {
+        $plan = new InstallationPlan($context, $planId);
+        if (Val::isNotNull($this->validator)) {
+            $plan->applyDiagnostics($this->validate($context));
+        }
+        $this->save($plan);
 
         return $plan;
     }
 
     public function resume(string $planId): ?InstallationPlan
     {
+        if (Val::isNull($this->checkpoints)) {
+            throw new \LogicException('A checkpoint store is required to resume an installation plan.');
+        }
+
         $checkpoint = $this->checkpoints->load($planId);
 
         return Val::isNull($checkpoint) ? null : InstallationPlan::restore($checkpoint);
@@ -58,25 +89,13 @@ class InstallationExecutor
 
     public function execute(InstallationPlan $plan): array
     {
-        $plan->start();
-        $this->checkpoints->save($plan->id(), $plan->toArray());
+        $plan->start($this->approvalRequired);
+        $this->save($plan);
 
         foreach ($this->stages as $stage) {
             $stage = Arr::make($stage);
             $name = (string)$stage->get('name');
             if ($plan->completedStage($name)) {
-                continue;
-            }
-
-            if ($plan->skipped($name)) {
-                $outcome = $this->outcome($name, [
-                    'ok' => true,
-                    'changed' => false,
-                    'skipped' => true,
-                    'evidence' => ['reason' => 'explicit_skip'],
-                ]);
-                $plan->checkpoint($name, $outcome);
-                $this->checkpoints->save($plan->id(), $plan->toArray());
                 continue;
             }
 
@@ -97,18 +116,58 @@ class InstallationExecutor
             $plan->checkpoint($name, $outcome);
             if (Flag::make(Arr::getPath($outcome, 'ok', false))->isFalse()) {
                 $plan->fail($name, $outcome);
-                $this->checkpoints->save($plan->id(), $plan->toArray());
+                $this->save($plan);
 
                 return $this->result($plan, false);
             }
 
-            $this->checkpoints->save($plan->id(), $plan->toArray());
+            $this->save($plan);
         }
 
         $plan->complete();
-        $this->checkpoints->save($plan->id(), $plan->toArray());
+        $this->save($plan);
 
         return $this->result($plan, true);
+    }
+
+    private function validate(array $context): array
+    {
+        try {
+            $result = $this->validator?->call($context);
+        } catch (\Throwable $exception) {
+            return [[
+                'reason' => 'validation_exception',
+                'message' => $exception->getMessage(),
+                'exception' => $exception::class,
+            ]];
+        }
+
+        if (Val::isNull($result) || Flag::make($result)->isTrue()) {
+            return [];
+        }
+        if (Flag::make($result)->isFalse()) {
+            return [[
+                'reason' => 'invalid_context',
+                'message' => 'The host rejected the installation context.',
+            ]];
+        }
+        if (Str::is($result)) {
+            return [['reason' => 'invalid_context', 'message' => $result]];
+        }
+        if (Arr::is($result)) {
+            return Arr::hasKey($result, 'message')
+                ? [Arr::make($result)->toArray()]
+                : Arr::make($result)->values()->toArray();
+        }
+
+        throw new \UnexpectedValueException('Installation validators must return null, bool, string, or diagnostics.');
+    }
+
+    private function save(InstallationPlan $plan): void
+    {
+        if (Val::isNotNull($this->checkpoints)) {
+            $this->checkpoints->save($plan->id(), $plan->toArray());
+        }
     }
 
     private function outcome(string $stage, mixed $raw): array
