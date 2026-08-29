@@ -56,6 +56,34 @@ throw new GatewayDenied('Forbidden', 403);
 
 Hosts can inspect `Engine::denied()` and `Engine::denial()` after processing when denial metadata is needed.
 
+### Optional Presence Bridge
+
+Applications with `bluefission/presence` installed may create the authenticated host bridge through the availability-safe factory:
+
+```php
+use BlueFission\BlueCore\Integration\Presence\PresenceBridgeFactory;
+use BlueFission\Presence\Bridge\BridgeContext;
+
+$bridge = PresenceBridgeFactory::make();
+$context = new BridgeContext();
+$context->host = 'bluecore';
+$context->authenticator = $authenticator;
+$context->session = [
+    'id' => $sessionId,
+    'type' => 'browser',
+];
+$context->metadata = [
+    'tenant_id' => $tenantId,
+    'action' => 'authenticate',
+];
+
+$result = $bridge->bind($context);
+```
+
+The bridge maps neutral identity and session values into Presence `Principal`, `AuthResult`, `Session`, and `Participant` contracts. An optional `annex_manifest` is ingested through Presence's Annex adapter. Unsupported or incomplete contexts return an unbound result with a stable reason and audit block.
+
+When Presence is unavailable, `PresenceBridgeFactory::make()` throws `PresenceBridgeUnavailable` with the `presence_contracts_unavailable` reason and the missing contract names. Bridge lifecycle extension points are exposed as `bluecore.presence.bridge.input`, `.before`, `.output`, and `.after` DevElation hooks.
+
 ### AI Integration
 
 BlueCore is designed to integrate seamlessly with AI libraries such as Automata (`bluefission/automata`), providing native compatibility and simplifying the process of building AI-powered applications.

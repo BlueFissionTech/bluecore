@@ -326,7 +326,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 
     public function showAllAddOns()
     {
-        $addonsPath = resolve_path('addons');
+        $addonsPath = $this->resolveProjectPath('addons');
         if (!is_dir($addonsPath)) {
             return [];
         }
@@ -510,7 +510,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
     {
         $addOnName = $this->normalizeAddOnIdentifier($addOn->name, 'name');
         $relative = 'mapping' . DIRECTORY_SEPARATOR . $name . '.php';
-        $canonicalRoot = Path::normalize(resolve_path('addons' . DIRECTORY_SEPARATOR . $addOnName));
+        $canonicalRoot = Path::normalize($this->resolveProjectPath('addons' . DIRECTORY_SEPARATOR . $addOnName));
         $configuredRoot = Path::normalize((string)$addOn->path);
         $candidates = Arr::make([]);
 
@@ -730,7 +730,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             return $result->toArray();
         }
 
-        $addOnRoot = Path::normalize(resolve_path('addons' . DIRECTORY_SEPARATOR . $name));
+        $addOnRoot = Path::normalize($this->resolveProjectPath('addons' . DIRECTORY_SEPARATOR . $name));
         $configuredRoot = Path::normalize((string)$addOn->path);
         $configured = Val::isEmpty($configuredRoot)
             ? null
@@ -837,7 +837,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
     protected function getAddOnData($name)
     {
         $name = $this->normalizeAddOnIdentifier($name, 'name');
-        $definitionPath = resolve_path('addons' . DIRECTORY_SEPARATOR . $name  . DIRECTORY_SEPARATOR . 'definition.json');
+        $definitionPath = $this->resolveProjectPath('addons' . DIRECTORY_SEPARATOR . $name  . DIRECTORY_SEPARATOR . 'definition.json');
         if (!(new File())->isReachable($definitionPath)) {
             throw new \InvalidArgumentException("Add-on definition not found for {$name}.");
         }
@@ -969,8 +969,8 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 
     protected function addOnPath(string $name): string
     {
-        $root = realpath(resolve_path('addons'));
-        $path = realpath(resolve_path('addons' . DIRECTORY_SEPARATOR . $name));
+        $root = realpath($this->resolveProjectPath('addons'));
+        $path = realpath($this->resolveProjectPath('addons' . DIRECTORY_SEPARATOR . $name));
 
         if (Val::isEmpty($root) || Val::isEmpty($path)) {
             throw new \InvalidArgumentException("Add-on path not found for {$name}.");
@@ -1065,6 +1065,16 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
     protected function datasourceManager(): mixed
     {
         return instance('datasource');
+    }
+
+    protected function resolveProjectPath(string $path): string
+    {
+        return Path::resolveProjectPath(
+            $path,
+            fallbackResolver: new Func(
+                static fn (string $relativePath): string => (string)resolve_path($relativePath)
+            )
+        );
     }
 
     protected function captureOutput(callable $operation): string
@@ -1168,7 +1178,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
                 array_splice( $path, 2, 0, 'logic' ); // splice in at position 2
 
                 $file = implode(DIRECTORY_SEPARATOR, $path);
-                $file = resolve_path($file);
+                $file = $this->resolveProjectPath($file);
             }
             if (file_exists($file)) {
                 require_once($file);
