@@ -325,6 +325,33 @@ class AddOnManagerTest extends TestCase
         $this->assertSame(1, $result['failed']);
     }
 
+    public function testInstallAllDiscoversApplicationAddOnAndRunsItsDatasourceStage(): void
+    {
+        $this->writeDefinition('applicationowned');
+        $model = new FakeAddOnModel();
+        $datasource = new FakeDatasourceManager();
+        $manager = new TestableAddOnManager($model, $datasource);
+
+        $result = $manager->installAll();
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(1, $result['total']);
+        $this->assertSame(1, $result['succeeded']);
+        $this->assertSame(1, $datasource->migrationRuns);
+        $this->assertSame(
+            Path::normalize(
+                self::$root
+                . DIRECTORY_SEPARATOR . 'addons'
+                . DIRECTORY_SEPARATOR . 'applicationowned'
+                . DIRECTORY_SEPARATOR . 'datasources'
+                . DIRECTORY_SEPARATOR . 'structure'
+                . DIRECTORY_SEPARATOR
+            ),
+            $datasource->deltaDirectories[0]
+        );
+        $this->assertCount(1, $model->records);
+    }
+
     public function testPassiveContributionsIncludeOnlyActiveAddOnsAndExposeRevisionChanges(): void
     {
         $firstPath = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'first';
@@ -704,6 +731,39 @@ PHP,
         $this->assertSame('Persisted add-on row is missing addon_id.', $result['results'][1]['error']);
     }
 
+    public function testDeactivateVerifiesPersistedInactiveState(): void
+    {
+        $model = new FakeAddOnModel([
+            ['addon_id' => 8, 'is_active' => 1],
+        ], returnArrays: true);
+        $manager = new TestableAddOnManager($model);
+
+        $result = $manager->deactivate(8);
+
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['changed']);
+        $this->assertTrue($result['verification']['ok']);
+        $this->assertSame(0, $result['verification']['is_active']);
+        $this->assertSame(0, $model->records[0]['is_active']);
+    }
+
+    public function testBulkDeactivationReportsSuccessfulWriteWithoutPersistenceAsFailure(): void
+    {
+        $model = new FakeAddOnModel([
+            ['addon_id' => 9, 'is_active' => 1],
+        ], returnArrays: true, ignoreActivationWritesForIds: [9]);
+        $manager = new TestableAddOnManager($model);
+
+        $result = $manager->deactivateAll();
+
+        $this->assertFalse($result['ok']);
+        $this->assertFalse($result['changed']);
+        $this->assertSame(1, $result['failed']);
+        $this->assertSame('verification', $result['results'][0]['stage']);
+        $this->assertSame('retry_deactivate', $result['results'][0]['nextAction']);
+        $this->assertSame('Add-on activation state was not persisted.', $result['results'][0]['error']);
+    }
+
     #[DataProvider('collectionContainerProvider')]
     public function testBulkLifecyclePreservesCollectionRowsAndNamespaceRoundTrips(string $container): void
     {
@@ -1027,7 +1087,8 @@ class FakeAddOnModel
         array $addons = [],
         private bool $returnArrays = false,
         private ?string $containerClass = null,
-        private array $failWritesForIds = []
+        private array $failWritesForIds = [],
+        private array $ignoreActivationWritesForIds = []
     )
     {
         $this->records = array_map(static fn($addon) => (array)$addon, $addons);
@@ -1043,6 +1104,11 @@ class FakeAddOnModel
             : 'Success.';
 
         if ($this->currentStatus !== 'Success.') {
+            return;
+        }
+
+        if (array_key_exists('is_active', $record)
+            && in_array($id, $this->ignoreActivationWritesForIds, true)) {
             return;
         }
 
@@ -1147,6 +1213,8 @@ class FakeDatasourceManager
 {
     public int $migrationRuns = 0;
     public int $populationRuns = 0;
+    public array $deltaDirectories = [];
+    public array $generatorDirectories = [];
     private array $published = [];
     private array $applied = [];
     private ?string $failedMigration = null;
@@ -1158,10 +1226,12 @@ class FakeDatasourceManager
 
     public function setDeltaDirectory(string $directory): void
     {
+        $this->deltaDirectories[] = Path::normalize($directory);
     }
 
     public function setGeneratorDirectory(string $directory): void
     {
+        $this->generatorDirectories[] = Path::normalize($directory);
     }
 
     public function publish(string $migration): void
