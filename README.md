@@ -31,6 +31,34 @@ Composer packages with the `opus-project` type install into `core/` by default. 
 
 Set `OPUS_STANDALONE=1` to install a project package under `vendor/` without promoting root overrides.
 
+### Resumable Installation Plans
+
+Application hosts can compose a versioned, resumable installation plan without moving product-specific onboarding into BlueCore. Each injected stage delegates to its existing lifecycle owner and declares the permissions it needs before execution:
+
+```php
+use BlueFission\BlueCore\Installation\InstallationExecutor;
+use BlueFission\BlueCore\Installation\JsonInstallationCheckpointStore;
+
+$executor = (new InstallationExecutor(
+    new JsonInstallationCheckpointStore($checkpointDirectory)
+))
+    ->stage('registration', fn ($plan) => $registrar->apply($registrationPlan), ['write_project'])
+    ->stage('addons', fn ($plan) => $addOns->installAll(), ['write_project', 'write_database'])
+    ->stage('migrations', fn ($plan) => $datasources->runMigrations($plan->id()), ['write_database'])
+    ->stage('population', fn ($plan) => $datasources->populate(), ['write_database']);
+
+$plan = $executor->prepare([
+    'project_name' => 'Example Application',
+    'defaults' => ['environment' => 'production'],
+    'skips' => ['population'],
+]);
+
+$plan->approve(['write_project', 'write_database']);
+$result = $executor->execute($plan);
+```
+
+The checkpoint records supplied values, accepted defaults, explicit skips, permission review, per-stage evidence, retry guidance, and terminal status. `resume($planId)` restores a failed or interrupted plan; completed successful stages are not repeated. Question rendering, branding, tenant creation, administrator provisioning, login transitions, and onboarding navigation remain host responsibilities.
+
 ## Usage
 
 ### Event Management
