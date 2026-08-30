@@ -58,6 +58,25 @@ class ModelSQLiteTest extends TestCase
         $this->assertSame('second', $rows[1]['name']);
     }
 
+    public function testFalseyScalarAssignmentsArePersisted(): void
+    {
+        $writer = new TestSQLiteModel($this->database);
+        $writer->write(['name' => 'switch', 'status' => 'active', 'is_active' => 1]);
+        $recordId = $writer->id();
+
+        $writer->write([
+            'record_id' => $recordId,
+            'status' => '',
+            'is_active' => 0,
+        ]);
+
+        $reader = new TestSQLiteModel($this->database);
+        $reader->read(['record_id' => $recordId]);
+
+        $this->assertSame('', $reader->field('status'));
+        $this->assertSame(0, (int)$reader->field('is_active'));
+    }
+
     public function testSQLiteStoreBoundaryNamesDevElationStorageAndLocalResponsibilities(): void
     {
         $boundary = SQLiteModelStore::boundary();
@@ -94,6 +113,7 @@ class TestSQLiteModel extends ModelSQLite
         'record_id',
         'name',
         'status',
+        'is_active',
     ];
 
     public function storeDiagnostics(): array

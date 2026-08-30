@@ -3,12 +3,23 @@
 namespace BlueFission\Utils;
 
 use BlueFission\Data\File as BaseFile;
+use BlueFission\Data\FileSystem;
 use BlueFission\Arr;
 use BlueFission\Flag;
 use BlueFission\Val;
 
 class File extends BaseFile
 {
+    public static function deletePath($path): bool
+    {
+        $normalized = Path::normalize($path);
+        if (Val::isEmpty($normalized) || !FileSystem::fileExists($normalized)) {
+            return false;
+        }
+
+        return unlink($normalized);
+    }
+
     public static function ensureFile($path, $contents = '', $overwrite = false)
     {
         $normalized = Path::normalize($path);

@@ -131,29 +131,11 @@ if (!function_exists('whisper')) {
 if(!function_exists('resolve_path')) {
 	function resolve_path($pathInProject, ?string $applicationRoot = null, ?string $legacyProjectRoot = null)
 	{
-	    $rootPath = rtrim($applicationRoot ?? APP_ROOT, DIRECTORY_SEPARATOR);
-	    $projectPath = rtrim($legacyProjectRoot ?? PROJECT_ROOT, DIRECTORY_SEPARATOR);
-	    $relativePath = Path::normalize((string)$pathInProject);
-
-	    $candidate = Path::normalize($rootPath . DIRECTORY_SEPARATOR . $relativePath);
-	    $fallback = Path::normalize($projectPath . DIRECTORY_SEPARATOR . $relativePath);
-	    $hasWildcard = Str::matchPattern($relativePath, '/[*?\[]/');
-
-	    if (!$hasWildcard && (
-	        FileSystem::fileExists($candidate)
-	        || FileSystem::directoryExists($candidate)
-	    )) {
-	        return $candidate;
-	    }
-
-	    if ($hasWildcard) {
-	        $matches = glob($candidate);
-	        if (!Flag::isFalse($matches) && Arr::isNotEmpty($matches)) {
-	            return $candidate;
-	        }
-	    }
-
-	    return $fallback;
+	    return Path::resolveProjectPath(
+	        $pathInProject,
+	        $applicationRoot,
+	        $legacyProjectRoot
+	    );
 	}
 }
 

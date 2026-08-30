@@ -194,9 +194,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 
     public function activate($addOnId): array
     {
-        $this->_model->write(['addon_id' => $addOnId, 'is_active' => 1]);
-
-        return $this->lifecycleResult('activate', (string)$addOnId, $this->_model->status(), $this->_model->query());
+        return $this->updateActivation($addOnId, true);
     }
 
     public function activateAll(): array
@@ -245,9 +243,51 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 
     public function deactivate($addOnId): array
     {
-        $this->_model->write(['addon_id' => $addOnId, 'is_active' => 0]);
+        return $this->updateActivation($addOnId, false);
+    }
 
-        return $this->lifecycleResult('deactivate', (string)$addOnId, $this->_model->status(), $this->_model->query());
+    private function updateActivation($addOnId, bool $active): array
+    {
+        $action = $active ? 'activate' : 'deactivate';
+        $this->_model->write([
+            'addon_id' => $addOnId,
+            'is_active' => $active ? 1 : 0,
+        ]);
+
+        $result = $this->lifecycleResult(
+            $action,
+            (string)$addOnId,
+            $this->_model->status(),
+            $this->_model->query()
+        );
+
+        if (Flag::isFalse($result['ok'])) {
+            return $result;
+        }
+
+        $this->_model->clear()->read(['addon_id' => $addOnId]);
+        $record = Arr::make((array)$this->_model->data());
+        $verified = $this->_model->status() === Storage::STATUS_SUCCESS
+            && $record->hasKey('is_active')
+            && Flag::parseBool($record->get('is_active')) === $active;
+
+        $result['verification'] = Arr::make([
+            'ok' => $verified,
+            'is_active' => $record->get('is_active'),
+            'modelStatus' => $this->_model->status(),
+        ])->toArray();
+
+        if (Flag::isFalse($verified)) {
+            $message = 'Add-on activation state was not persisted.';
+            $result['ok'] = false;
+            $result['changed'] = false;
+            $result['stage'] = 'verification';
+            $result['nextAction'] = "retry_{$action}";
+            $result['error'] = $message;
+            $result['messages'] = [$message];
+        }
+
+        return $result;
     }
 
     public function migrate($addOnId): array
@@ -286,7 +326,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 
     public function showAllAddOns()
     {
-        $addonsPath = resolve_path('addons');
+        $addonsPath = $this->resolveProjectPath('addons');
         if (!is_dir($addonsPath)) {
             return [];
         }
@@ -470,7 +510,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
     {
         $addOnName = $this->normalizeAddOnIdentifier($addOn->name, 'name');
         $relative = 'mapping' . DIRECTORY_SEPARATOR . $name . '.php';
-        $canonicalRoot = Path::normalize(resolve_path('addons' . DIRECTORY_SEPARATOR . $addOnName));
+        $canonicalRoot = Path::normalize($this->resolveProjectPath('addons' . DIRECTORY_SEPARATOR . $addOnName));
         $configuredRoot = Path::normalize((string)$addOn->path);
         $candidates = Arr::make([]);
 
@@ -690,7 +730,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             return $result->toArray();
         }
 
-        $addOnRoot = Path::normalize(resolve_path('addons' . DIRECTORY_SEPARATOR . $name));
+        $addOnRoot = Path::normalize($this->resolveProjectPath('addons' . DIRECTORY_SEPARATOR . $name));
         $configuredRoot = Path::normalize((string)$addOn->path);
         $configured = Val::isEmpty($configuredRoot)
             ? null
@@ -797,7 +837,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
     protected function getAddOnData($name)
     {
         $name = $this->normalizeAddOnIdentifier($name, 'name');
-        $definitionPath = resolve_path('addons' . DIRECTORY_SEPARATOR . $name  . DIRECTORY_SEPARATOR . 'definition.json');
+        $definitionPath = $this->resolveProjectPath('addons' . DIRECTORY_SEPARATOR . $name  . DIRECTORY_SEPARATOR . 'definition.json');
         if (!(new File())->isReachable($definitionPath)) {
             throw new \InvalidArgumentException("Add-on definition not found for {$name}.");
         }
@@ -929,8 +969,8 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
 
     protected function addOnPath(string $name): string
     {
-        $root = realpath(resolve_path('addons'));
-        $path = realpath(resolve_path('addons' . DIRECTORY_SEPARATOR . $name));
+        $root = realpath($this->resolveProjectPath('addons'));
+        $path = realpath($this->resolveProjectPath('addons' . DIRECTORY_SEPARATOR . $name));
 
         if (Val::isEmpty($root) || Val::isEmpty($path)) {
             throw new \InvalidArgumentException("Add-on path not found for {$name}.");
@@ -1025,6 +1065,16 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
     protected function datasourceManager(): mixed
     {
         return instance('datasource');
+    }
+
+    protected function resolveProjectPath(string $path): string
+    {
+        return Path::resolveProjectPath(
+            $path,
+            fallbackResolver: new Func(
+                static fn (string $relativePath): string => (string)resolve_path($relativePath)
+            )
+        );
     }
 
     protected function captureOutput(callable $operation): string
@@ -1128,7 +1178,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
                 array_splice( $path, 2, 0, 'logic' ); // splice in at position 2
 
                 $file = implode(DIRECTORY_SEPARATOR, $path);
-                $file = resolve_path($file);
+                $file = $this->resolveProjectPath($file);
             }
             if (file_exists($file)) {
                 require_once($file);
