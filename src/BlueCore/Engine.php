@@ -8,6 +8,9 @@ use BlueFission\Behavioral\Behaviors\Event;
 use BlueFission\Utils\Loader;
 use BlueFission\BlueCore\Security;
 use BlueFission\BlueCore\Gateway\GatewayDenied;
+use BlueFission\BlueCore\Registration\RegistrationResolutionException;
+use BlueFission\Arr;
+use BlueFission\Str;
 use BlueFission\Val;
 
 /**
@@ -18,6 +21,13 @@ use BlueFission\Val;
  * @package BlueFission\BlueCore
  */
 class Engine extends Application {
+
+	/**
+	 * The active Engine instance for each concrete application class.
+	 *
+	 * @var array<class-string, Engine>
+	 */
+	private static array $_activeInstances = [];
 
 	/**
 	 * The loader object
@@ -55,6 +65,84 @@ class Engine extends Application {
 	private $_session;
 
 	private ?GatewayDenied $_gatewayDenial = null;
+
+	public function __construct($config = [])
+	{
+		parent::__construct($config);
+
+		self::$_activeInstances[static::class] = $this;
+	}
+
+	/**
+	 * Return the active instance for the concrete Engine class.
+	 */
+	public static function instance()
+	{
+		$calledClass = static::class;
+		$instances = Arr::make(self::$_activeInstances);
+
+		if ($instances->hasKey($calledClass)) {
+			return $instances->get($calledClass);
+		}
+
+		$instance = parent::getInstance($calledClass);
+		if (!$instance instanceof $calledClass) {
+			throw new \LogicException("Application instance '{$calledClass}' is not compatible with the active Engine class.");
+		}
+
+		self::$_activeInstances[$calledClass] = $instance;
+
+		return $instance;
+	}
+
+	/**
+	 * Resolve a dependency from the active concrete Engine instance.
+	 */
+	public static function makeInstance(string $class)
+	{
+		return static::instance()->resolveForPhase($class, 'static');
+	}
+
+	public function resolve(string $class)
+	{
+		return $this->resolveForPhase($class);
+	}
+
+	/**
+	 * Resolve a root contract while retaining lifecycle-phase diagnostics.
+	 */
+	public function resolveForPhase(string $class, string $phase = 'runtime')
+	{
+		$contract = Str::trim($class);
+		$lifecyclePhase = Str::trim($phase);
+		$bindings = Arr::make($this->_bindings);
+		$implementation = $bindings->hasKey($contract)
+			? $bindings->get($contract)
+			: $contract;
+
+		if (Val::isEmpty($contract) || Val::isEmpty($lifecyclePhase)) {
+			throw new \InvalidArgumentException('Dependency contract and lifecycle phase cannot be empty.');
+		}
+
+		if (!Str::is($implementation) || Val::isEmpty($implementation)) {
+			throw RegistrationResolutionException::forBinding(
+				$contract,
+				$lifecyclePhase,
+				$implementation
+			);
+		}
+
+		try {
+			return parent::resolve($implementation);
+		} catch (\Throwable $exception) {
+			throw RegistrationResolutionException::forBinding(
+				$contract,
+				$lifecyclePhase,
+				$implementation,
+				$exception
+			);
+		}
+	}
 
 	public function process()
 	{

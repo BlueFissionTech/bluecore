@@ -14,6 +14,20 @@ An extension can describe its contribution through a `RegistrationPlan`:
 
 Registrars implement `BlueFission\BlueCore\Contracts\IApplicationRegistrar` and receive both the application instance and a mutable `RegistrationPlan`.
 
+### Application-owned resolution
+
+Registration phases must resolve dependencies from the `Engine` instance that
+owns the lifecycle. `Engine::makeInstance()` selects the active concrete Engine
+class, while `resolveForPhase($contract, $phase)` applies root interface bindings
+and retains the contract, implementation, lifecycle phase, and original failure
+in a structured `RegistrationResolutionException` diagnostic.
+
+This avoids relying on process-wide first-instance ordering when more than one
+named DevElation `Application` or application subclass exists. Registrars that
+already receive an application instance should keep using that instance for
+binding and phase-aware resolution. The broader DevElation instance-selection
+contract is tracked in [DevElation #246](https://github.com/BlueFissionTech/develation/issues/246).
+
 ## Passive Contributions
 
 `loadActivatedContributions($name)` discovers optional `mapping/<name>.php`
