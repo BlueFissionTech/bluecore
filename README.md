@@ -31,6 +31,34 @@ Composer packages with the `opus-project` type install into `core/` by default. 
 
 Set `OPUS_STANDALONE=1` to install a project package under `vendor/` without promoting root overrides.
 
+### Optional Installation Orchestration
+
+Application hosts can compose a resumable sequence without adopting a BlueCore-defined installation schema. The plan context, validation rules, approval evidence, stage metadata, ordering, and product transitions remain host-owned:
+
+```php
+use BlueFission\BlueCore\Installation\InstallationExecutor;
+use BlueFission\BlueCore\Installation\JsonInstallationCheckpointStore;
+
+$executor = (new InstallationExecutor(
+    new JsonInstallationCheckpointStore($checkpointDirectory)
+))
+    ->validator(fn (array $context) => $hostPolicy->validate($context))
+    ->requireApproval()
+    ->stage('registration', fn ($plan) => $registrar->apply($plan->context()), [
+        'owner' => 'host',
+    ])
+    ->stage('lifecycle', fn ($plan) => $lifecycle->apply($plan->context()));
+
+$plan = $executor->prepare($hostDefinedContext);
+
+$plan->approve($hostApprovalEvidence);
+$result = $executor->execute($plan);
+```
+
+The checkpoint store and approval gate are optional. Without a checkpoint store, the executor can run an in-memory plan but cannot resume it later. BlueCore records structured stage outcomes and avoids repeating successful stages after a resume; it does not prescribe installation questions, required fields, defaults, skips, permissions, or a product-specific stage graph.
+
+The checkpoint records supplied values, accepted defaults, explicit skips, permission review, per-stage evidence, retry guidance, and terminal status. `resume($planId)` restores a failed or interrupted plan; completed successful stages are not repeated. Question rendering, branding, tenant creation, administrator provisioning, login transitions, and onboarding navigation remain host responsibilities.
+
 ## Usage
 
 ### Event Management
