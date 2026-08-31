@@ -48,10 +48,39 @@ Filters may add or normalize ordinary request arguments, but they must not remov
 
 During the alpha compatibility period, the previous dynamic-gateway filter is applied first and the neutral BlueCore filter is applied second. New integrations should register only `DynamicGateway::FILTER_ARGUMENTS`.
 
+## Registration plan hooks
+
+Owner: `RegistrationPlan`.
+
+| Constant and hook | Type | Payload or value | Contract |
+| --- | --- | --- | --- |
+| `RegistrationPlan::FILTER_ENTRY`<br>`bluecore.registration.plan.entry` | Filter | `RegistrationEntry` | May return a replacement entry for the same section. The name and definition may change; moving an entry between sections is rejected. |
+| `RegistrationPlan::HOOK_ENTRY_ADDED`<br>`bluecore.registration.plan.entry.added` | Action | `RegistrationEntry $entry, RegistrationPlan $plan` | Runs after a validated entry is stored. |
+| `RegistrationPlan::HOOK_ENTRY_FAILED`<br>`bluecore.registration.plan.entry.failed` | Action | `LifecycleFailure $failure` | Observes sanitized composition failure metadata before the original exception is rethrown. |
+
+Registration filters must return `RegistrationEntry`. Invalid types, empty names, and attempts to change the section fail before the plan is mutated. Re-entry into the same plan hook is suppressed; nested registration calls still execute with their unfiltered entry so the plan remains usable without recursively invoking the same callback.
+
+## Add-on registration hooks
+
+Owner: `AddOnManager`.
+
+| Constant and hook | Type | Payload or value | Contract |
+| --- | --- | --- | --- |
+| `AddOnManager::FILTER_REGISTRATION_PLAN`<br>`bluecore.addon.registration.plan` | Filter | `RegistrationPlan` | Transforms the shared plan before active registration factories run. Must return `RegistrationPlan`. |
+| `AddOnManager::HOOK_REGISTRATION_BEFORE`<br>`bluecore.addon.registration.before` | Action | `AddOn $addOn, Application $application, RegistrationPlan $plan, AddOnManager $manager` | Runs immediately before one active factory. |
+| `AddOnManager::HOOK_REGISTRATION_AFTER`<br>`bluecore.addon.registration.after` | Action | `AddOn $addOn, Application $application, RegistrationPlan $plan, AddOnManager $manager` | Runs after one factory completes successfully. |
+| `AddOnManager::HOOK_REGISTRATION_FAILED`<br>`bluecore.addon.registration.failed` | Action | `LifecycleFailure $failure` | Observes sanitized factory failure metadata. The structured registration result retains the existing operational diagnostics. |
+| `AddOnManager::FILTER_CONTRIBUTIONS`<br>`bluecore.addon.contributions` | Filter | `Arr` | Transforms the final passive contribution summary. Must return `Arr`. |
+
+Registration is guarded per add-on runtime key. A callback that re-enters active add-on loading receives a `registration_in_progress` status for the in-flight add-on, and its factory is not executed twice. Contribution filters run only after path containment and passive-data validation have completed; filters cannot make unsafe files eligible for loading.
+
 ```php
 use BlueFission\Arr;
+use BlueFission\BlueCore\Business\Managers\AddOnManager;
 use BlueFission\BlueCore\Engine;
 use BlueFission\BlueCore\Gateway\DynamicGateway;
+use BlueFission\BlueCore\Registration\RegistrationEntry;
+use BlueFission\BlueCore\Registration\RegistrationPlan;
 use BlueFission\DevElation;
 
 DevElation::up();
@@ -65,6 +94,20 @@ DevElation::action(
     Engine::HOOK_RUN_AFTER,
     function (Engine $result, Engine $engine): void {
         // Observe completed execution without replacing framework control flow.
+    }
+);
+
+DevElation::filter(
+    RegistrationPlan::FILTER_ENTRY,
+    function (RegistrationEntry $entry): RegistrationEntry {
+        return $entry;
+    }
+);
+
+DevElation::filter(
+    AddOnManager::FILTER_CONTRIBUTIONS,
+    function (Arr $summary): Arr {
+        return $summary;
     }
 );
 ```

@@ -13,6 +13,8 @@ use BlueFission\Net\HTTP;
 use BlueFission\Flag;
 use BlueFission\Security\Hash;
 use BlueFission\BlueCore\Registration\RegistrationPlan;
+use BlueFission\BlueCore\Hooks\DispatchesLifecycleHooks;
+use BlueFission\BlueCore\Hooks\LifecycleFailure;
 use BlueFission\Services\Application;
 use BlueFission\Services\Service;
 use BlueFission\Utils\Loader;
@@ -26,10 +28,19 @@ use BlueFission\Val;
 
 class AddOnManager extends Service implements IAddOnLifecycleManager
 {
+    use DispatchesLifecycleHooks;
+
+    public const FILTER_REGISTRATION_PLAN = 'bluecore.addon.registration.plan';
+    public const FILTER_CONTRIBUTIONS = 'bluecore.addon.contributions';
+    public const HOOK_REGISTRATION_BEFORE = 'bluecore.addon.registration.before';
+    public const HOOK_REGISTRATION_AFTER = 'bluecore.addon.registration.after';
+    public const HOOK_REGISTRATION_FAILED = 'bluecore.addon.registration.failed';
+
     private $_loader;
     protected $_model;
     private array $_loadedAddOns = [];
     private array $_registeredAddOns = [];
+    private array $_registeringAddOns = [];
 
     public function __construct(MySQLLink $link)
     {
@@ -366,6 +377,16 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             );
         }
 
+        if ($plan instanceof RegistrationPlan) {
+            $plan = $this->applyLifecycleFilter(self::FILTER_REGISTRATION_PLAN, $plan);
+
+            if (!$plan instanceof RegistrationPlan) {
+                throw new \UnexpectedValueException(
+                    'Add-on registration plan filters must return a RegistrationPlan.'
+                );
+            }
+        }
+
         $addOns = $this->_model->getActivatedAddOns();
         $results = Arr::make([]);
 
@@ -395,10 +416,29 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
                 continue;
             }
 
+            if (Arr::hasKey($this->_registeringAddOns, $key)) {
+                $load['registration'] = $this->registrationResult('registration_in_progress');
+                $results->push($load);
+                continue;
+            }
+
+            $this->_registeringAddOns[$key] = true;
             try {
+                $this->dispatchLifecycleAction(self::HOOK_REGISTRATION_BEFORE, [
+                    $object,
+                    $application,
+                    $plan,
+                    $this,
+                ]);
                 Func::make($load['value'])->call($application, $plan);
                 $this->_registeredAddOns[$key] = true;
                 $load['registration'] = $this->registrationResult('registered', true);
+                $this->dispatchLifecycleAction(self::HOOK_REGISTRATION_AFTER, [
+                    $object,
+                    $application,
+                    $plan,
+                    $this,
+                ]);
             } catch (\Throwable $exception) {
                 $load['ok'] = false;
                 $load['stage'] = 'registration';
@@ -409,6 +449,16 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
                     false,
                     $exception
                 );
+                $this->dispatchLifecycleAction(self::HOOK_REGISTRATION_FAILED, [
+                    new LifecycleFailure(
+                        self::HOOK_REGISTRATION_FAILED,
+                        'register',
+                        (string)$object->name,
+                        $exception
+                    ),
+                ]);
+            } finally {
+                unset($this->_registeringAddOns[$key]);
             }
 
             $results->push($load);
@@ -442,7 +492,7 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             ->values();
         $snapshot = $entries->toArray();
 
-        return Arr::make([
+        $contributions = Arr::make([
             'ok' => Arr::isEmpty($failed->toArray()),
             'name' => $name,
             'revision' => Hash::value(HTTP::jsonEncode($snapshot), 'sha256'),
@@ -451,7 +501,16 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             'missing' => $missing->count(),
             'failed' => $failed->count(),
             'results' => $snapshot,
-        ])->toArray();
+        ]);
+        $contributions = $this->applyLifecycleFilter(self::FILTER_CONTRIBUTIONS, $contributions);
+
+        if (!$contributions instanceof Arr) {
+            throw new \UnexpectedValueException(
+                'Add-on contribution filters must return an Arr.'
+            );
+        }
+
+        return $contributions->toArray();
     }
 
     protected function loadContribution(AddOn $addOn, string $name): array
