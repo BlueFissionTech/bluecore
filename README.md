@@ -20,7 +20,7 @@ BlueCore provides core functionality and architecture for modular, scalable web 
 BlueCore requires PHP 8.2 or newer. Install the current alpha release through Composer:
 
 ```bash
-composer require bluefission/bluecore:^0.1.3@alpha
+composer require bluefission/bluecore:^0.1.4@alpha
 ```
 
 The alpha line is intended for integration testing while the public API is finalized. Pin an explicit alpha constraint in reproducible environments.
