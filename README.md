@@ -150,6 +150,8 @@ The `MenuItem` and `Menu` classes represent individual items and collections of 
 
 The `Engine` class sets up and starts the BlueFission application, loading configurations and auto-discovering helpers and mappings. It serves as the main entry point for initializing and running the application.
 
+Engine lifecycle actions and framework filters follow the stable contracts documented in [DevElation Hooks](docs/develation-hooks.md).
+
 ## Intention and Target Framework
 
 ### Flexibility and Extensibility
