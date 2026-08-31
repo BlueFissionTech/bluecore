@@ -72,4 +72,3 @@ DevElation::action(
 ## Integration hooks
 
 The optional authentication bridge also exposes stable input/output filters and before/after actions through its public hook constants. Their value contracts are documented by the bridge types and tests.
-

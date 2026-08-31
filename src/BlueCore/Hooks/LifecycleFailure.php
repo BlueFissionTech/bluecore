@@ -52,4 +52,3 @@ final class LifecycleFailure extends Obj
         return $this->_data['exception_code'];
     }
 }
-

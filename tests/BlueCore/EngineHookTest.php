@@ -333,4 +333,3 @@ class HookFailingBootstrapEngine extends Engine
         throw new RuntimeException('configuration failure');
     }
 }
-
