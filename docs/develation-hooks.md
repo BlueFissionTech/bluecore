@@ -9,7 +9,7 @@ Hook names use `bluecore.<area>.<operation>.<phase>`.
 - Actions are observational. They receive the documented arguments and do not replace framework values.
 - Filters transform one documented value. Each callback must return a value compatible with the filter contract.
 - Lower numeric priorities run before higher priorities, following DevElation ordering.
-- Hook callbacks should avoid re-entering the lifecycle operation that dispatched them.
+- Re-entry is suppressed per Engine and hook name by default. `Engine::hookRecursionDepth()` provides an explicit opt-in bounded by `Engine::MAX_HOOK_RECURSION_DEPTH`.
 - Security checks remain authoritative. Hooks must not be used to bypass validation, authorization, or gateway denial.
 
 ## Engine actions
@@ -20,17 +20,25 @@ Owner: `Engine`. All payloads are observational references: callbacks may inspec
 | --- | --- | --- | --- |
 | `Engine::HOOK_BOOTSTRAP_BEFORE`<br>`bluecore.engine.bootstrap.before` | Before bootstrap | `Engine $engine` | Runs before bootstrap work. Callback exceptions stop bootstrap. |
 | `Engine::HOOK_BOOTSTRAP_AFTER`<br>`bluecore.engine.bootstrap.after` | After bootstrap | `Engine $engine` | Runs only after successful bootstrap. |
-| `Engine::HOOK_BOOTSTRAP_FAILED`<br>`bluecore.engine.bootstrap.failed` | Bootstrap failure | `Throwable $exception, Engine $engine` | Observes an exception before it is rethrown. |
+| `Engine::HOOK_BOOTSTRAP_FAILED`<br>`bluecore.engine.bootstrap.failed` | Bootstrap failure | `LifecycleFailure $failure` | Observes sanitized failure metadata before the original exception is rethrown. |
 | `Engine::HOOK_PROCESS_BEFORE`<br>`bluecore.engine.process.before` | Before request processing | `Engine $engine` | Runs before gateway processing. Callback exceptions stop processing. |
 | `Engine::HOOK_PROCESS_AFTER`<br>`bluecore.engine.process.after` | After request processing | `Engine $engine` | Runs after success or controlled gateway denial. |
 | `Engine::HOOK_PROCESS_DENIED`<br>`bluecore.engine.process.denied` | Controlled denial | `GatewayDenied $denial, Engine $engine` | Observes a fail-closed denial; it cannot clear it. |
-| `Engine::HOOK_PROCESS_FAILED`<br>`bluecore.engine.process.failed` | Processing failure | `Throwable $exception, Engine $engine` | Observes an unexpected exception before it is rethrown. |
+| `Engine::HOOK_PROCESS_FAILED`<br>`bluecore.engine.process.failed` | Processing failure | `LifecycleFailure $failure` | Observes sanitized failure metadata before the original exception is rethrown. |
 | `Engine::HOOK_RUN_BEFORE`<br>`bluecore.engine.run.before` | Before execution | `Engine $engine` | Runs only when processing has not been denied. Callback exceptions stop execution. |
 | `Engine::HOOK_RUN_AFTER`<br>`bluecore.engine.run.after` | After execution | `Engine $result, Engine $engine` | Runs only after successful execution. |
 | `Engine::HOOK_RUN_DENIED`<br>`bluecore.engine.run.denied` | Execution skipped | `GatewayDenied $denial, Engine $engine` | Observes the denial that prevented execution. |
-| `Engine::HOOK_RUN_FAILED`<br>`bluecore.engine.run.failed` | Execution failure | `Throwable $exception, Engine $engine` | Observes an unexpected exception before it is rethrown. |
+| `Engine::HOOK_RUN_FAILED`<br>`bluecore.engine.run.failed` | Execution failure | `LifecycleFailure $failure` | Observes sanitized failure metadata before the original exception is rethrown. |
 
 The `after` action is dispatched only when the operation completes normally. A gateway denial is a handled process outcome, so `process.denied` is followed by `process.after`; `run.denied` is dispatched when execution is intentionally skipped.
+
+`LifecycleFailure` exposes only the hook, operation, dispatcher name, exception class, and numeric exception code. It intentionally omits the exception message, trace, request, configuration, session, and mutable Engine instance. Failure hooks never recursively redispatch themselves at the default depth.
+
+```php
+$engine->hookRecursionDepth(Engine::HOOK_PROCESS_BEFORE, 2);
+```
+
+The configured depth is local to that Engine instance and hook. Values must be between 1 and 8; depth 1 is the non-recursive default. Failure hooks cannot opt into recursive dispatch.
 
 ## Gateway filter
 
@@ -64,3 +72,4 @@ DevElation::action(
 ## Integration hooks
 
 The optional authentication bridge also exposes stable input/output filters and before/after actions through its public hook constants. Their value contracts are documented by the bridge types and tests.
+

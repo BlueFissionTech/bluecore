@@ -9,10 +9,13 @@ use BlueFission\DevElation as Dev;
 use BlueFission\Utils\Loader;
 use BlueFission\BlueCore\Security;
 use BlueFission\BlueCore\Gateway\GatewayDenied;
+use BlueFission\BlueCore\Hooks\LifecycleFailure;
 use BlueFission\BlueCore\Registration\RegistrationResolutionException;
 use BlueFission\Arr;
+use BlueFission\Num;
 use BlueFission\Str;
 use BlueFission\Val;
+use InvalidArgumentException;
 use Throwable;
 
 /**
@@ -35,6 +38,13 @@ class Engine extends Application {
 	public const HOOK_RUN_AFTER = 'bluecore.engine.run.after';
 	public const HOOK_RUN_DENIED = 'bluecore.engine.run.denied';
 	public const HOOK_RUN_FAILED = 'bluecore.engine.run.failed';
+	public const MAX_HOOK_RECURSION_DEPTH = 8;
+
+	private const NON_RECURSIVE_HOOKS = [
+		self::HOOK_BOOTSTRAP_FAILED,
+		self::HOOK_PROCESS_FAILED,
+		self::HOOK_RUN_FAILED,
+	];
 
 	/**
 	 * The active Engine instance for each concrete application class.
@@ -79,6 +89,10 @@ class Engine extends Application {
 	private $_session;
 
 	private ?GatewayDenied $_gatewayDenial = null;
+
+	private array $_activeHookDepths = [];
+
+	private array $_hookDepthLimits = [];
 
 	public function __construct($config = [])
 	{
@@ -161,19 +175,19 @@ class Engine extends Application {
 	public function process()
 	{
 		$this->_gatewayDenial = null;
-		Dev::do(self::HOOK_PROCESS_BEFORE, [$this]);
+		$this->dispatchHook(self::HOOK_PROCESS_BEFORE, [$this]);
 
 		try {
 			parent::process();
 		} catch (GatewayDenied $denial) {
 			$this->_gatewayDenial = $denial;
-			Dev::do(self::HOOK_PROCESS_DENIED, [$denial, $this]);
+			$this->dispatchHook(self::HOOK_PROCESS_DENIED, [$denial, $this]);
 		} catch (Throwable $exception) {
-			Dev::do(self::HOOK_PROCESS_FAILED, [$exception, $this]);
+			$this->dispatchFailureHook(self::HOOK_PROCESS_FAILED, 'process', $exception);
 			throw $exception;
 		}
 
-		Dev::do(self::HOOK_PROCESS_AFTER, [$this]);
+		$this->dispatchHook(self::HOOK_PROCESS_AFTER, [$this]);
 
 		return $this;
 	}
@@ -181,20 +195,20 @@ class Engine extends Application {
 	public function run()
 	{
 		if ($this->denied()) {
-			Dev::do(self::HOOK_RUN_DENIED, [$this->_gatewayDenial, $this]);
+			$this->dispatchHook(self::HOOK_RUN_DENIED, [$this->_gatewayDenial, $this]);
 			return $this;
 		}
 
-		Dev::do(self::HOOK_RUN_BEFORE, [$this]);
+		$this->dispatchHook(self::HOOK_RUN_BEFORE, [$this]);
 
 		try {
 			$result = parent::run();
 		} catch (Throwable $exception) {
-			Dev::do(self::HOOK_RUN_FAILED, [$exception, $this]);
+			$this->dispatchFailureHook(self::HOOK_RUN_FAILED, 'run', $exception);
 			throw $exception;
 		}
 
-		Dev::do(self::HOOK_RUN_AFTER, [$result, $this]);
+		$this->dispatchHook(self::HOOK_RUN_AFTER, [$result, $this]);
 
 		return $result;
 	}
@@ -215,7 +229,7 @@ class Engine extends Application {
 	 * @return Engine
 	 */
 	public function bootstrap() {
-		Dev::do(self::HOOK_BOOTSTRAP_BEFORE, [$this]);
+		$this->dispatchHook(self::HOOK_BOOTSTRAP_BEFORE, [$this]);
 
 		try {
 			Security::init();
@@ -236,13 +250,65 @@ class Engine extends Application {
 
 			$this->_session = instance('session');
 		} catch (Throwable $exception) {
-			Dev::do(self::HOOK_BOOTSTRAP_FAILED, [$exception, $this]);
+			$this->dispatchFailureHook(self::HOOK_BOOTSTRAP_FAILED, 'bootstrap', $exception);
 			throw $exception;
 		}
 
-		Dev::do(self::HOOK_BOOTSTRAP_AFTER, [$this]);
+		$this->dispatchHook(self::HOOK_BOOTSTRAP_AFTER, [$this]);
 		
 		return $this;
+	}
+
+	public function hookRecursionDepth(string $hook, int $depth = 1): self
+	{
+		if (!Str::startsWith($hook, 'bluecore.engine.')) {
+			throw new InvalidArgumentException('Engine hook recursion can only be configured for Engine-owned hooks.');
+		}
+
+		if ($depth < 1 || $depth > self::MAX_HOOK_RECURSION_DEPTH) {
+			throw new InvalidArgumentException(
+				'Engine hook recursion depth must be between 1 and ' . self::MAX_HOOK_RECURSION_DEPTH . '.'
+			);
+		}
+
+		if ($depth > 1 && Arr::has(self::NON_RECURSIVE_HOOKS, $hook)) {
+			throw new InvalidArgumentException('Engine failure hooks cannot opt into recursive dispatch.');
+		}
+
+		$this->_hookDepthLimits[$hook] = $depth;
+
+		return $this;
+	}
+
+	private function dispatchHook(string $hook, array $arguments = []): void
+	{
+		$currentDepth = (int)($this->_activeHookDepths[$hook] ?? 0);
+		$allowedDepth = (int)($this->_hookDepthLimits[$hook] ?? 1);
+
+		if ($currentDepth >= $allowedDepth) {
+			return;
+		}
+
+		$this->_activeHookDepths[$hook] = (int)Num::make($currentDepth)->increment()->val();
+
+		try {
+			Dev::do($hook, $arguments);
+		} finally {
+			$remainingDepth = (int)Num::make($this->_activeHookDepths[$hook])->decrement()->val();
+
+			if ($remainingDepth <= 0) {
+				unset($this->_activeHookDepths[$hook]);
+			} else {
+				$this->_activeHookDepths[$hook] = $remainingDepth;
+			}
+		}
+	}
+
+	private function dispatchFailureHook(string $hook, string $operation, Throwable $exception): void
+	{
+		$this->dispatchHook($hook, [
+			new LifecycleFailure($hook, $operation, (string)$this->name(), $exception),
+		]);
 	}
 
 	/**
@@ -380,3 +446,4 @@ class Engine extends Application {
 		return $this;
 	}
 }
+

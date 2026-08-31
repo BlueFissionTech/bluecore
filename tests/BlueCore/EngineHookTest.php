@@ -4,6 +4,7 @@ namespace BlueFission\Tests\BlueCore;
 
 use BlueFission\BlueCore\Engine;
 use BlueFission\BlueCore\Gateway\GatewayDenied;
+use BlueFission\BlueCore\Hooks\LifecycleFailure;
 use BlueFission\DevElation as Dev;
 use BlueFission\Services\Gateway;
 use BlueFission\Services\Request;
@@ -128,12 +129,14 @@ class EngineHookTest extends TestCase
     public function testProcessFailureDispatchesFailedWithoutAfter(): void
     {
         $events = [];
+        $failure = null;
         Dev::up();
-        $this->recordActions($events, [
-            Engine::HOOK_PROCESS_BEFORE => 'process-before',
-            Engine::HOOK_PROCESS_FAILED => 'process-failed',
-            Engine::HOOK_PROCESS_AFTER => 'process-after',
-        ]);
+        $this->recordActions($events, [Engine::HOOK_PROCESS_BEFORE => 'process-before']);
+        Dev::action(Engine::HOOK_PROCESS_FAILED, function (LifecycleFailure $context) use (&$events, &$failure): void {
+            $events[] = 'process-failed';
+            $failure = $context;
+        });
+        $this->recordActions($events, [Engine::HOOK_PROCESS_AFTER => 'process-after']);
 
         $engine = $this->engine('/process-failure');
         $engine->gateway('fail-hooks', HookFailingGateway::class);
@@ -147,6 +150,12 @@ class EngineHookTest extends TestCase
         }
 
         $this->assertSame(['process-before', 'process-failed'], $events);
+        $this->assertInstanceOf(LifecycleFailure::class, $failure);
+        $this->assertSame(Engine::HOOK_PROCESS_FAILED, $failure->hook());
+        $this->assertSame('process', $failure->operation());
+        $this->assertSame($engine->name(), $failure->dispatcher());
+        $this->assertSame(RuntimeException::class, $failure->exceptionType());
+        $this->assertSame(0, $failure->exceptionCode());
     }
 
     public function testRunFailureDispatchesFailedWithoutAfter(): void
@@ -197,6 +206,80 @@ class EngineHookTest extends TestCase
         }
 
         $this->assertSame(['bootstrap-before', 'bootstrap-failed'], $events);
+    }
+
+    public function testEngineHookReentryIsSuppressedByDefault(): void
+    {
+        $invocations = 0;
+        Dev::up();
+        Dev::action(Engine::HOOK_PROCESS_BEFORE, function (Engine $engine) use (&$invocations): void {
+            $invocations++;
+            $engine->process();
+        });
+
+        $engine = $this->engine('/reentry-default');
+        $engine->map('get', 'reentry-default', fn(): string => 'ready');
+        $engine->args()->process();
+
+        $this->assertSame(1, $invocations);
+    }
+
+    public function testEngineHookReentryRequiresAnExplicitBoundedDepth(): void
+    {
+        $invocations = 0;
+        Dev::up();
+        Dev::action(Engine::HOOK_PROCESS_BEFORE, function (Engine $engine) use (&$invocations): void {
+            $invocations++;
+
+            if ($invocations < 3) {
+                $engine->process();
+            }
+        });
+
+        $engine = $this->engine('/reentry-opt-in');
+        $engine->map('get', 'reentry-opt-in', fn(): string => 'ready');
+        $engine->args()->hookRecursionDepth(Engine::HOOK_PROCESS_BEFORE, 2)->process();
+
+        $this->assertSame(2, $invocations);
+    }
+
+    public function testFailureHookDoesNotRedispatchItself(): void
+    {
+        $invocations = 0;
+        Dev::up();
+
+        $engine = $this->engine('/failure-reentry');
+        $engine->gateway('fail-reentry-hooks', HookFailingGateway::class);
+        $engine->map('get', 'failure-reentry', fn(): string => 'unreachable')->gateway('fail-reentry-hooks');
+        $engine->args();
+
+        Dev::action(Engine::HOOK_PROCESS_FAILED, function () use (&$invocations, $engine): void {
+            $invocations++;
+
+            try {
+                $engine->process();
+            } catch (RuntimeException) {
+            }
+        });
+
+        try {
+            $engine->process();
+            $this->fail('The failing gateway did not throw.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('gateway failure', $exception->getMessage());
+        }
+
+        $this->assertSame(1, $invocations);
+    }
+
+    public function testFailureHooksCannotOptIntoRecursiveDispatch(): void
+    {
+        $engine = $this->engine('/failure-recursion-config');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('failure hooks');
+
+        $engine->hookRecursionDepth(Engine::HOOK_PROCESS_FAILED, 2);
     }
 
     private function engine(string $uri): Engine
@@ -250,3 +333,4 @@ class HookFailingBootstrapEngine extends Engine
         throw new RuntimeException('configuration failure');
     }
 }
+
