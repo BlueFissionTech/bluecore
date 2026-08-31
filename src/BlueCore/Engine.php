@@ -5,6 +5,7 @@ use BlueFission\Services\Application;
 use BlueFission\Services\Service;
 use BlueFission\Services\Response;
 use BlueFission\Behavioral\Behaviors\Event;
+use BlueFission\DevElation as Dev;
 use BlueFission\Utils\Loader;
 use BlueFission\BlueCore\Security;
 use BlueFission\BlueCore\Gateway\GatewayDenied;
@@ -12,6 +13,7 @@ use BlueFission\BlueCore\Registration\RegistrationResolutionException;
 use BlueFission\Arr;
 use BlueFission\Str;
 use BlueFission\Val;
+use Throwable;
 
 /**
  * Class Engine
@@ -21,6 +23,18 @@ use BlueFission\Val;
  * @package BlueFission\BlueCore
  */
 class Engine extends Application {
+
+	public const HOOK_BOOTSTRAP_BEFORE = 'bluecore.engine.bootstrap.before';
+	public const HOOK_BOOTSTRAP_AFTER = 'bluecore.engine.bootstrap.after';
+	public const HOOK_BOOTSTRAP_FAILED = 'bluecore.engine.bootstrap.failed';
+	public const HOOK_PROCESS_BEFORE = 'bluecore.engine.process.before';
+	public const HOOK_PROCESS_AFTER = 'bluecore.engine.process.after';
+	public const HOOK_PROCESS_DENIED = 'bluecore.engine.process.denied';
+	public const HOOK_PROCESS_FAILED = 'bluecore.engine.process.failed';
+	public const HOOK_RUN_BEFORE = 'bluecore.engine.run.before';
+	public const HOOK_RUN_AFTER = 'bluecore.engine.run.after';
+	public const HOOK_RUN_DENIED = 'bluecore.engine.run.denied';
+	public const HOOK_RUN_FAILED = 'bluecore.engine.run.failed';
 
 	/**
 	 * The active Engine instance for each concrete application class.
@@ -147,12 +161,19 @@ class Engine extends Application {
 	public function process()
 	{
 		$this->_gatewayDenial = null;
+		Dev::do(self::HOOK_PROCESS_BEFORE, [$this]);
 
 		try {
 			parent::process();
 		} catch (GatewayDenied $denial) {
 			$this->_gatewayDenial = $denial;
+			Dev::do(self::HOOK_PROCESS_DENIED, [$denial, $this]);
+		} catch (Throwable $exception) {
+			Dev::do(self::HOOK_PROCESS_FAILED, [$exception, $this]);
+			throw $exception;
 		}
+
+		Dev::do(self::HOOK_PROCESS_AFTER, [$this]);
 
 		return $this;
 	}
@@ -160,10 +181,22 @@ class Engine extends Application {
 	public function run()
 	{
 		if ($this->denied()) {
+			Dev::do(self::HOOK_RUN_DENIED, [$this->_gatewayDenial, $this]);
 			return $this;
 		}
 
-		return parent::run();
+		Dev::do(self::HOOK_RUN_BEFORE, [$this]);
+
+		try {
+			$result = parent::run();
+		} catch (Throwable $exception) {
+			Dev::do(self::HOOK_RUN_FAILED, [$exception, $this]);
+			throw $exception;
+		}
+
+		Dev::do(self::HOOK_RUN_AFTER, [$result, $this]);
+
+		return $result;
 	}
 
 	public function denied(): bool
@@ -182,24 +215,32 @@ class Engine extends Application {
 	 * @return Engine
 	 */
 	public function bootstrap() {
+		Dev::do(self::HOOK_BOOTSTRAP_BEFORE, [$this]);
 
-		Security::init();
+		try {
+			Security::init();
 
-		$this->_loader = Loader::instance();
+			$this->_loader = Loader::instance();
 
-		$this->dispatch('OnAppInitialized');
+			$this->dispatch('OnAppInitialized');
 		
-		$this->loadConfiguration();
+			$this->loadConfiguration();
 
-		$this->autoDiscoverHelpers();
+			$this->autoDiscoverHelpers();
 
-		$this->autoDiscoverMapping();
+			$this->autoDiscoverMapping();
 
-		$this->dispatch('OnAppLoaded');
+			$this->dispatch('OnAppLoaded');
 
-		$this->assetDir(store('asset_dir'));
+			$this->assetDir(store('asset_dir'));
 
-		$this->_session = instance('session');
+			$this->_session = instance('session');
+		} catch (Throwable $exception) {
+			Dev::do(self::HOOK_BOOTSTRAP_FAILED, [$exception, $this]);
+			throw $exception;
+		}
+
+		Dev::do(self::HOOK_BOOTSTRAP_AFTER, [$this]);
 		
 		return $this;
 	}
