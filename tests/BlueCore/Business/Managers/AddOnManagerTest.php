@@ -2,12 +2,15 @@
 
 namespace BlueFission\Tests\BlueCore\Business\Managers;
 
+use BlueFission\Arr;
 use BlueFission\BlueCore\Business\Managers\AddOnManager;
 use BlueFission\BlueCore\Domain\AddOn\AddOn;
+use BlueFission\BlueCore\Hooks\LifecycleFailure;
 use BlueFission\BlueCore\Registration\RegistrationPlan;
 use BlueFission\Collections\Collection;
 use BlueFission\Collections\Group;
 use BlueFission\Services\Application;
+use BlueFission\DevElation as Dev;
 use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -36,6 +39,7 @@ class AddOnManagerTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->resetDevElation();
         unset(
             $GLOBALS['bluecore_registration_factory_calls'],
             $GLOBALS['bluecore_inactive_primary_loads']
@@ -50,6 +54,7 @@ class AddOnManagerTest extends TestCase
 
     protected function tearDown(): void
     {
+        $this->resetDevElation();
         if (self::$ownsRoot) {
             $this->removeDir(self::$root);
         }
@@ -687,6 +692,144 @@ PHP,
         }
     }
 
+    public function testRegistrationPlanFilterAndActionsWrapFactoryExecution(): void
+    {
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'hookedfactory';
+        File::ensureFile(
+            $path . DIRECTORY_SEPARATOR . 'main.php',
+            '<?php return static function ($application, $plan): void { $plan->service("factory", "executed"); };',
+            true
+        );
+        $manager = new TestableAddOnManager(new FakeAddOnModel([[
+            'addon_id' => 25,
+            'name' => 'hookedfactory',
+            'path' => $path,
+            'primary_file' => 'main.php',
+            'is_active' => 1,
+        ]]));
+        $events = [];
+        Dev::up();
+        Dev::filter(
+            AddOnManager::FILTER_REGISTRATION_PLAN,
+            function (RegistrationPlan $plan) use (&$events): RegistrationPlan {
+                $events[] = 'filter';
+
+                return $plan->service('filtered', 'ready');
+            }
+        );
+        Dev::action(AddOnManager::HOOK_REGISTRATION_BEFORE, function () use (&$events): void {
+            $events[] = 'before';
+        });
+        Dev::action(AddOnManager::HOOK_REGISTRATION_AFTER, function () use (&$events): void {
+            $events[] = 'after';
+        });
+        $plan = new RegistrationPlan();
+
+        $result = $manager->loadActivatedAddOns(
+            new Application(['name' => 'registration-hook-test']),
+            $plan
+        );
+
+        $this->assertTrue($result[0]['ok']);
+        $this->assertSame(['filter', 'before', 'after'], $events);
+        $this->assertSame('ready', $plan->entries('services')['filtered']);
+        $this->assertSame('executed', $plan->entries('services')['factory']);
+    }
+
+    public function testRegistrationFailureActionReceivesSanitizedContext(): void
+    {
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'failedhookfactory';
+        File::ensureFile(
+            $path . DIRECTORY_SEPARATOR . 'main.php',
+            '<?php return static function (): void { throw new RuntimeException("private detail"); };',
+            true
+        );
+        $manager = new TestableAddOnManager(new FakeAddOnModel([[
+            'addon_id' => 26,
+            'name' => 'failedhookfactory',
+            'path' => $path,
+            'primary_file' => 'main.php',
+            'is_active' => 1,
+        ]]));
+        $failure = null;
+        Dev::up();
+        Dev::action(
+            AddOnManager::HOOK_REGISTRATION_FAILED,
+            function (LifecycleFailure $context) use (&$failure): void {
+                $failure = $context;
+            }
+        );
+
+        $result = $manager->loadActivatedAddOns(
+            new Application(['name' => 'registration-failure-hook-test']),
+            new RegistrationPlan()
+        );
+
+        $this->assertFalse($result[0]['ok']);
+        $this->assertInstanceOf(LifecycleFailure::class, $failure);
+        $this->assertSame('failedhookfactory', $failure->dispatcher());
+        $this->assertSame(\RuntimeException::class, $failure->exceptionType());
+        $this->assertArrayNotHasKey('message', $failure->data());
+    }
+
+    public function testRegistrationActionReentryDoesNotExecuteFactoryTwice(): void
+    {
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'reentrantfactory';
+        File::ensureFile(
+            $path . DIRECTORY_SEPARATOR . 'main.php',
+            '<?php return static function (): void { $GLOBALS["bluecore_registration_factory_calls"] = ($GLOBALS["bluecore_registration_factory_calls"] ?? 0) + 1; };',
+            true
+        );
+        $manager = new TestableAddOnManager(new FakeAddOnModel([[
+            'addon_id' => 27,
+            'name' => 'reentrantfactory',
+            'path' => $path,
+            'primary_file' => 'main.php',
+            'is_active' => 1,
+        ]]));
+        $application = new Application(['name' => 'registration-reentry-test']);
+        $plan = new RegistrationPlan();
+        $nested = null;
+        Dev::up();
+        Dev::action(
+            AddOnManager::HOOK_REGISTRATION_BEFORE,
+            function () use ($manager, $application, $plan, &$nested): void {
+                $nested = $manager->loadActivatedAddOns($application, $plan);
+            }
+        );
+
+        $result = $manager->loadActivatedAddOns($application, $plan);
+
+        $this->assertSame('registered', $result[0]['registration']['status']);
+        $this->assertSame('registration_in_progress', $nested[0]['registration']['status']);
+        $this->assertSame(1, $GLOBALS['bluecore_registration_factory_calls']);
+    }
+
+    public function testContributionSummaryFilterRequiresAndReturnsArr(): void
+    {
+        $manager = new TestableAddOnManager(new FakeAddOnModel());
+        Dev::up();
+        Dev::filter(
+            AddOnManager::FILTER_CONTRIBUTIONS,
+            function (Arr $summary): Arr {
+                $summary->set('source', 'filtered');
+
+                return $summary;
+            }
+        );
+
+        $result = $manager->loadActivatedContributions('capabilities');
+
+        $this->assertSame('filtered', $result['source']);
+
+        $this->resetDevElation();
+        Dev::up();
+        Dev::filter(AddOnManager::FILTER_CONTRIBUTIONS, fn(): array => []);
+
+        $this->expectException(\UnexpectedValueException::class);
+        $manager->loadActivatedContributions('capabilities');
+    }
+
     public function testActivateAndActivateAllReturnStructuredStatuses(): void
     {
         $model = new FakeAddOnModel([
@@ -1001,6 +1144,17 @@ PHP,
                 '<?php',
                 true
             );
+        }
+    }
+
+    private function resetDevElation(): void
+    {
+        Dev::down();
+        $reflection = new \ReflectionClass(Dev::class);
+
+        foreach (['_filters', '_actions', '_listeners', '_config'] as $propertyName) {
+            $property = $reflection->getProperty($propertyName);
+            $property->setValue(null, []);
         }
     }
 
