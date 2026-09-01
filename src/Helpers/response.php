@@ -6,7 +6,11 @@ use BlueFission\HTML\Template;
 use BlueFission\Services\Response;
 use BlueFission\Net\HTTP;
 use BlueFission\Arr;
+use BlueFission\BlueCore\Hooks\HelperLifecycleHooks;
+use BlueFission\BlueCore\Hooks\LifecycleFailure;
+use BlueFission\Flag;
 use BlueFission\Func;
+use BlueFission\Num;
 use BlueFission\Str;
 use BlueFission\Val;
 use BlueFission\Utils\File;
@@ -24,19 +28,81 @@ if (!function_exists( 'template' )) {
 	function template(string $themeName, string $file, array $data = []) {
 		static $delegating = false;
 
-		if (Val::isFalsy($delegating)) {
-			$renderer = template_renderer_service();
-			if (Val::isNotNull($renderer) && Func::isCallable([$renderer, 'render'])) {
-				$delegating = true;
-				try {
-					return $renderer->render($themeName, $file, $data);
-				} finally {
-					$delegating = false;
+		try {
+			$filteredData = HelperLifecycleHooks::apply(
+				HelperLifecycleHooks::FILTER_TEMPLATE_DATA,
+				Arr::make($data)
+			);
+			if (!$filteredData instanceof Arr) {
+				throw new UnexpectedValueException('Template data filters must return Arr.');
+			}
+
+			$data = $filteredData->val();
+			HelperLifecycleHooks::action(
+				HelperLifecycleHooks::HOOK_TEMPLATE_BEFORE,
+				[template_lifecycle_summary($themeName, $file, $data)]
+			);
+
+			$output = null;
+			$rendered = Flag::make(false);
+			if (Val::isFalsy($delegating)) {
+				$renderer = template_renderer_service();
+				if (Val::isNotNull($renderer) && Func::isCallable([$renderer, 'render'])) {
+					$delegating = true;
+					try {
+						$output = $renderer->render($themeName, $file, $data);
+						$rendered->val(true);
+					} finally {
+						$delegating = false;
+					}
 				}
 			}
-		}
 
-		return template_legacy_render($themeName, $file, $data);
+			if ($rendered->isFalse()) {
+				$output = template_legacy_render($themeName, $file, $data);
+			}
+			if (!Str::is($output)) {
+				throw new UnexpectedValueException('Template renderers must return a string.');
+			}
+
+			$filteredOutput = HelperLifecycleHooks::apply(
+				HelperLifecycleHooks::FILTER_TEMPLATE_OUTPUT,
+				Str::make($output)
+			);
+			if (!$filteredOutput instanceof Str) {
+				throw new UnexpectedValueException('Template output filters must return Str.');
+			}
+
+			$output = $filteredOutput->val();
+			$summary = template_lifecycle_summary($themeName, $file, $data);
+			$summary->set('output_length', Str::len($output));
+			HelperLifecycleHooks::action(HelperLifecycleHooks::HOOK_TEMPLATE_AFTER, [$summary]);
+
+			return $output;
+		} catch (Throwable $exception) {
+			HelperLifecycleHooks::failure(
+				HelperLifecycleHooks::HOOK_TEMPLATE_FAILED,
+				new LifecycleFailure(
+					HelperLifecycleHooks::HOOK_TEMPLATE_FAILED,
+					'render',
+					'template',
+					$exception
+				)
+			);
+
+			throw $exception;
+		}
+	}
+}
+
+if (!function_exists('template_lifecycle_summary')) {
+	function template_lifecycle_summary(string $themeName, string $file, array $data): Arr
+	{
+		return Arr::make([
+			'theme' => $themeName,
+			'file' => $file,
+			'data_count' => Arr::size($data),
+		]);
 	}
 }
 
@@ -222,16 +288,73 @@ if (!function_exists( 'get_template_url' )) {
  * @return string The JSON representation of the response data
  */
 function response($data, $status = 200) {
-	$response = new Response();
+	try {
+		$context = HelperLifecycleHooks::apply(
+			HelperLifecycleHooks::FILTER_RESPONSE,
+			Arr::make([
+				'data' => $data,
+				'status' => Num::int($status),
+			])
+		);
+		if (!$context instanceof Arr) {
+			throw new UnexpectedValueException('Response filters must return Arr.');
+		}
+		if (!$context->hasKey('data') || !$context->hasKey('status')) {
+			throw new UnexpectedValueException('Response filters must preserve data and status fields.');
+		}
 
-	$response->fill($data);
-	$statusLine = HTTP::statusLine((int)$status);
-	if (Val::isNotEmpty($statusLine)) {
-		header($statusLine, true, (int)$status);
+		$status = $context['status'] ?? null;
+		if (!Num::isInt($status) || $status < 100 || $status > 599) {
+			throw new UnexpectedValueException('Response status must be an integer between 100 and 599.');
+		}
+
+		$data = $context['data'];
+		HelperLifecycleHooks::action(
+			HelperLifecycleHooks::HOOK_RESPONSE_BEFORE,
+			[response_lifecycle_summary($status)]
+		);
+
+		$response = new Response();
+		$response->fill($data);
+		$statusLine = HTTP::statusLine($status);
+		if (Val::isNotEmpty($statusLine)) {
+			header($statusLine, true, $status);
+		}
+
+		header(HTTP::headerLine('Content-Type', 'application/json'));
+		HelperLifecycleHooks::action(
+			HelperLifecycleHooks::HOOK_RESPONSE_AFTER,
+			[response_lifecycle_summary($status)]
+		);
+		HelperLifecycleHooks::event(
+			HelperLifecycleHooks::EVENT_RESPONSE_PREPARED,
+			[response_lifecycle_summary($status)]
+		);
+
+		return $response->send();
+	} catch (Throwable $exception) {
+		HelperLifecycleHooks::failure(
+			HelperLifecycleHooks::HOOK_RESPONSE_FAILED,
+			new LifecycleFailure(
+				HelperLifecycleHooks::HOOK_RESPONSE_FAILED,
+				'prepare',
+				'response',
+				$exception
+			)
+		);
+
+		throw $exception;
 	}
+}
 
-	header(HTTP::headerLine('Content-Type', 'application/json'));
-	return $response->send();
+if (!function_exists('response_lifecycle_summary')) {
+	function response_lifecycle_summary(int $status): Arr
+	{
+		return Arr::make([
+			'status' => $status,
+			'content_type' => 'application/json',
+		]);
+	}
 }
 
 /**

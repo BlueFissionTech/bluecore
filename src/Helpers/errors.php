@@ -1,6 +1,7 @@
 <?php
 
 use BlueFission\Arr;
+use BlueFission\BlueCore\Hooks\HelperLifecycleHooks;
 use BlueFission\Flag;
 use BlueFission\Net\HTTP;
 use BlueFission\Num;
@@ -36,6 +37,15 @@ if (!function_exists('customErrorHandler')) {
         }
 
         error_log("Error: [{$errno}] {$errstr} in {$errfile} on line {$errline}");
+        blueCoreReportLifecycleError(
+            HelperLifecycleHooks::HOOK_ERROR_REPORTED,
+            Arr::make([
+                'kind' => 'error',
+                'code' => Num::int($errno),
+                'debug' => blueCoreDebugMode(),
+                'sapi' => PHP_SAPI,
+            ])
+        );
 
         if (!blueCoreDebugMode()) {
             return true;
@@ -70,6 +80,16 @@ if (!function_exists('customExceptionHandler')) {
             'Exception: ' . $exception->getMessage()
             . ' in ' . $exception->getFile()
             . ' on line ' . $exception->getLine()
+        );
+        blueCoreReportLifecycleError(
+            HelperLifecycleHooks::HOOK_EXCEPTION_REPORTED,
+            Arr::make([
+                'kind' => 'exception',
+                'code' => Num::int($exception->getCode()),
+                'exception_type' => $exception::class,
+                'debug' => blueCoreDebugMode(),
+                'sapi' => PHP_SAPI,
+            ])
         );
         blueCoreSetErrorStatus();
 
@@ -113,6 +133,15 @@ if (!function_exists('shutdownHandler')) {
             . ' in ' . $error['file']
             . ' on line ' . $error['line']
         );
+        blueCoreReportLifecycleError(
+            HelperLifecycleHooks::HOOK_FATAL_REPORTED,
+            Arr::make([
+                'kind' => 'fatal',
+                'code' => Num::int($error['type']),
+                'debug' => blueCoreDebugMode(),
+                'sapi' => PHP_SAPI,
+            ])
+        );
         blueCoreSetErrorStatus();
 
         if (!blueCoreDebugMode()) {
@@ -138,6 +167,17 @@ if (!function_exists('shutdownHandler')) {
     }
 
     register_shutdown_function('shutdownHandler');
+}
+
+if (!function_exists('blueCoreReportLifecycleError')) {
+    function blueCoreReportLifecycleError(string $hook, Arr $summary): void
+    {
+        try {
+            HelperLifecycleHooks::action($hook, [$summary]);
+        } catch (Throwable) {
+            error_log("BlueCore lifecycle hook '{$hook}' failed during error reporting.");
+        }
+    }
 }
 
 if (!function_exists('sourceCodeWindow')) {

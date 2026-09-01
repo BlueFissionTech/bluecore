@@ -105,11 +105,34 @@ Owner: `InstallationExecutor`. Installation actions expose summaries only. Host 
 | `InstallationExecutor::HOOK_EXECUTE_AFTER`<br>`bluecore.installation.execute.after` | Execution success | `Arr $summary, InstallationExecutor $executor` | Runs after completion is persisted. |
 | `InstallationExecutor::HOOK_EXECUTE_FAILED`<br>`bluecore.installation.execute.failed` | Execution failure | `LifecycleFailure $failure` | Observes sanitized readiness or stage failure metadata. |
 
+## Response, template, and error hooks
+
+Owner: `HelperLifecycleHooks`. These constants cover Composer-loaded global helpers that do not have a class owner. Re-entry into the same helper hook is suppressed.
+
+| Constant and hook | Type | Payload or value | Contract |
+| --- | --- | --- | --- |
+| `HelperLifecycleHooks::FILTER_RESPONSE`<br>`bluecore.response.prepare` | Filter | `Arr` with `data` and integer `status` | Must return `Arr`. The status must remain between 100 and 599. |
+| `HelperLifecycleHooks::HOOK_RESPONSE_BEFORE`<br>`bluecore.response.before` | Action | Sanitized `Arr` with `status` and `content_type` | Runs before the DevElation `Response` is filled and headers are prepared. Response data is not exposed. |
+| `HelperLifecycleHooks::HOOK_RESPONSE_AFTER`<br>`bluecore.response.after` | Action | Sanitized `Arr` with `status` and `content_type` | Runs after response preparation and immediately before `Response::send()`. DevElation delivery exits on its complete event, so this is not a post-delivery callback. |
+| `HelperLifecycleHooks::HOOK_RESPONSE_FAILED`<br>`bluecore.response.failed` | Action | `LifecycleFailure $failure` | Observes sanitized preparation or extension failure metadata before the original exception is rethrown. |
+| `HelperLifecycleHooks::EVENT_RESPONSE_PREPARED`<br>`bluecore.response.prepared` | Event | Sanitized response summary `Arr` | A genuine prepared-response event triggered immediately before delivery. Register it with `listen()`, then attach callables with `subscribe()`. |
+| `HelperLifecycleHooks::FILTER_TEMPLATE_DATA`<br>`bluecore.template.data` | Filter | Template data `Arr` | Must return `Arr`. Theme selection and the relative template file remain framework-owned and cannot be changed through this filter. |
+| `HelperLifecycleHooks::HOOK_TEMPLATE_BEFORE`<br>`bluecore.template.before` | Action | Sanitized `Arr` with `theme`, `file`, and `data_count` | Runs after data filtering and before renderer selection. Data values are not exposed. |
+| `HelperLifecycleHooks::FILTER_TEMPLATE_OUTPUT`<br>`bluecore.template.output` | Filter | Rendered `Str` | Must return `Str`. Runs only after a renderer returns a native string. |
+| `HelperLifecycleHooks::HOOK_TEMPLATE_AFTER`<br>`bluecore.template.after` | Action | Sanitized template summary `Arr` | Runs after output filtering and adds `output_length` without exposing rendered content. |
+| `HelperLifecycleHooks::HOOK_TEMPLATE_FAILED`<br>`bluecore.template.failed` | Action | `LifecycleFailure $failure` | Observes sanitized rendering or extension failure metadata before the original exception is rethrown. |
+| `HelperLifecycleHooks::HOOK_ERROR_REPORTED`<br>`bluecore.error.reported` | Action | Sanitized error summary `Arr` | Runs after logging a handled PHP error. Message, file, line, and trace are omitted. |
+| `HelperLifecycleHooks::HOOK_EXCEPTION_REPORTED`<br>`bluecore.exception.reported` | Action | Sanitized exception summary `Arr` | Adds only exception class and numeric code to the shared error summary fields. |
+| `HelperLifecycleHooks::HOOK_FATAL_REPORTED`<br>`bluecore.fatal.reported` | Action | Sanitized fatal summary `Arr` | Runs after fatal-error logging. Hook failures are contained so they cannot replace error reporting. |
+
+Response and template filter failures remain fail-closed. Error-report actions are observational and cannot replace the original logging, status, debug-output, or exit behavior.
+
 ```php
 use BlueFission\Arr;
 use BlueFission\BlueCore\Business\Managers\AddOnManager;
 use BlueFission\BlueCore\Engine;
 use BlueFission\BlueCore\Gateway\DynamicGateway;
+use BlueFission\BlueCore\Hooks\HelperLifecycleHooks;
 use BlueFission\BlueCore\Registration\RegistrationEntry;
 use BlueFission\BlueCore\Registration\RegistrationPlan;
 use BlueFission\DevElation;
@@ -145,6 +168,14 @@ DevElation::filter(
     function (Arr $summary): Arr {
         return $summary;
     }
+);
+
+DevElation::listen(HelperLifecycleHooks::EVENT_RESPONSE_PREPARED);
+DevElation::subscribe(
+    function (Arr $summary): void {
+        // React to a prepared response without inspecting its body.
+    },
+    HelperLifecycleHooks::EVENT_RESPONSE_PREPARED
 );
 ```
 
