@@ -2,12 +2,18 @@
 
 namespace BlueFission\Tests\Helpers;
 
+use BlueFission\Arr;
 use BlueFission\BlueCore\Engine;
+use BlueFission\BlueCore\Hooks\HelperLifecycleHooks;
+use BlueFission\BlueCore\Hooks\LifecycleFailure;
 use BlueFission\BlueCore\Theme;
+use BlueFission\DevElation as Dev;
 use BlueFission\Services\Application;
+use BlueFission\Str;
 use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
 use PHPUnit\Framework\TestCase;
+use UnexpectedValueException;
 
 class TemplateRenderingHelperTest extends TestCase
 {
@@ -35,12 +41,71 @@ class TemplateRenderingHelperTest extends TestCase
     protected function setUp(): void
     {
         $this->resetApplications();
+        $this->resetDevElation();
         Path::ensureDir($this->themePath());
     }
 
     protected function tearDown(): void
     {
+        $this->resetDevElation();
         $this->resetApplications();
+    }
+
+    public function testTemplateFiltersDataAndOutputAroundRenderingActions(): void
+    {
+        $events = [];
+        $this->writeTemplate('hooked.tpl', 'Hello, {$name}');
+        $this->engineWithTheme();
+        Dev::up();
+        Dev::filter(HelperLifecycleHooks::FILTER_TEMPLATE_DATA, function (Arr $data) use (&$events): Arr {
+            $events[] = 'data';
+            $data->set('name', 'Grace');
+
+            return $data;
+        });
+        Dev::action(HelperLifecycleHooks::HOOK_TEMPLATE_BEFORE, function (Arr $summary) use (&$events): void {
+            $events[] = 'before';
+            $this->assertSame(1, $summary['data_count']);
+            $this->assertFalse($summary->hasKey('data'));
+        });
+        Dev::filter(HelperLifecycleHooks::FILTER_TEMPLATE_OUTPUT, function (Str $output) use (&$events): Str {
+            $events[] = 'output';
+
+            return $output->append('!');
+        });
+        Dev::action(HelperLifecycleHooks::HOOK_TEMPLATE_AFTER, function (Arr $summary) use (&$events): void {
+            $events[] = 'after';
+            $this->assertSame(13, $summary['output_length']);
+        });
+
+        $this->assertSame('Hello, Grace!', template('test', 'hooked.tpl', ['name' => 'Ada']));
+        $this->assertSame(['data', 'before', 'output', 'after'], $events);
+    }
+
+    public function testTemplateOutputFilterRejectsInvalidTypesAndDispatchesFailure(): void
+    {
+        $failure = null;
+        $this->writeTemplate('invalid-hook.tpl', 'Invalid');
+        $this->engineWithTheme();
+        Dev::up();
+        Dev::filter(HelperLifecycleHooks::FILTER_TEMPLATE_OUTPUT, fn(Str $output): string => $output->val());
+        Dev::action(
+            HelperLifecycleHooks::HOOK_TEMPLATE_FAILED,
+            function (LifecycleFailure $context) use (&$failure): void {
+                $failure = $context;
+            }
+        );
+
+        try {
+            template('test', 'invalid-hook.tpl');
+            $this->fail('The invalid template output filter did not fail.');
+        } catch (UnexpectedValueException $exception) {
+            $this->assertSame('Template output filters must return Str.', $exception->getMessage());
+        }
+
+        $this->assertInstanceOf(LifecycleFailure::class, $failure);
+        $this->assertSame(HelperLifecycleHooks::HOOK_TEMPLATE_FAILED, $failure->hook());
+        $this->assertSame(UnexpectedValueException::class, $failure->exceptionType());
     }
 
     public function testTemplateDelegatesToRegisteredRenderingService(): void
@@ -143,5 +208,15 @@ class TemplateRenderingHelperTest extends TestCase
         $instances->setValue(null, []);
         $active = new \ReflectionProperty(Engine::class, '_activeInstances');
         $active->setValue(null, []);
+    }
+
+    private function resetDevElation(): void
+    {
+        Dev::down();
+
+        foreach (['_filters', '_actions', '_listeners', '_config'] as $propertyName) {
+            $property = new \ReflectionProperty(Dev::class, $propertyName);
+            $property->setValue(null, []);
+        }
     }
 }
