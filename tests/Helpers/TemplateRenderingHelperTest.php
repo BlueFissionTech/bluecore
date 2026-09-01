@@ -141,7 +141,7 @@ class TemplateRenderingHelperTest extends TestCase
     {
         $instances = new \ReflectionProperty(Application::class, '_instances');
         $instances->setValue(null, []);
-		$active = new \ReflectionProperty(Engine::class, '_activeInstances');
-		$active->setValue(null, []);
+        $active = new \ReflectionProperty(Engine::class, '_activeInstances');
+        $active->setValue(null, []);
     }
 }

@@ -83,10 +83,10 @@ class DatasourceManagerPopulationTest extends TestCase
             DatasourceManager::FILTER_POPULATION_PLAN,
             function (Arr $plan) use (&$events): Arr {
                 $events[] = 'filter';
-				$filtered = Arr::make($plan->toArray());
-				$filtered->set('generators', ['SecondSeeder.php']);
+                $filtered = Arr::make($plan->toArray());
+                $filtered->set('generators', ['SecondSeeder.php']);
 
-				return $filtered;
+                return $filtered;
             }
         );
         Dev::action(

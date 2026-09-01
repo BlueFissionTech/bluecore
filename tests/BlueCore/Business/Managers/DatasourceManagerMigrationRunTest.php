@@ -73,10 +73,10 @@ class DatasourceManagerMigrationRunTest extends TestCase
             DatasourceManager::FILTER_MIGRATION_PLAN,
             function (Arr $plan) use (&$events): Arr {
                 $events[] = 'filter';
-				$filtered = Arr::make($plan->toArray());
-				$filtered->set('deltas', ['002_later.php']);
+                $filtered = Arr::make($plan->toArray());
+                $filtered->set('deltas', ['002_later.php']);
 
-				return $filtered;
+                return $filtered;
             }
         );
         Dev::action(

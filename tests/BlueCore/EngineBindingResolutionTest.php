@@ -91,20 +91,20 @@ final class EngineBindingResolutionTest extends TestCase
     {
         $first = new Engine(['name' => 'first-named-engine']);
         $second = new Engine(['name' => 'second-named-engine']);
-		$first->bind(EngineBindingContract::class, EngineBindingImplementation::class);
-		$second->bind(EngineBindingContract::class, AlternateEngineBindingImplementation::class);
+        $first->bind(EngineBindingContract::class, EngineBindingImplementation::class);
+        $second->bind(EngineBindingContract::class, AlternateEngineBindingImplementation::class);
 
         $this->assertSame($first, Engine::instance('first-named-engine'));
         $this->assertSame($second, Engine::instance('second-named-engine'));
         $this->assertSame($second, Engine::instance());
-		$this->assertInstanceOf(
-			EngineBindingImplementation::class,
-			Engine::makeInstance(EngineBindingContract::class, 'first-named-engine')
-		);
-		$this->assertInstanceOf(
-			AlternateEngineBindingImplementation::class,
-			Engine::makeInstance(EngineBindingContract::class, $second)
-		);
+        $this->assertInstanceOf(
+            EngineBindingImplementation::class,
+            Engine::makeInstance(EngineBindingContract::class, 'first-named-engine')
+        );
+        $this->assertInstanceOf(
+            AlternateEngineBindingImplementation::class,
+            Engine::makeInstance(EngineBindingContract::class, $second)
+        );
     }
 
     public function testResolutionFailureNamesTheContractAndLifecyclePhase(): void
