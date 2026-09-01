@@ -104,9 +104,21 @@ class Engine extends Application {
 	/**
 	 * Return the active instance for the concrete Engine class.
 	 */
-	public static function instance()
+	public static function instance($name = null)
 	{
 		$calledClass = static::class;
+
+		if (Val::isNotNull($name)) {
+			$instance = parent::getInstance($name);
+			if (!$instance instanceof $calledClass) {
+				throw new \LogicException(
+					"Application instance '{$name}' is not compatible with the active Engine class."
+				);
+			}
+
+			return $instance;
+		}
+
 		$instances = Arr::make(self::$_activeInstances);
 
 		if ($instances->hasKey($calledClass)) {
@@ -126,9 +138,20 @@ class Engine extends Application {
 	/**
 	 * Resolve a dependency from the active concrete Engine instance.
 	 */
-	public static function makeInstance(string $class)
+	public static function makeInstance(
+		string $class,
+		Application|string|null $application = null
+	)
 	{
-		return static::instance()->resolveForPhase($class, 'static');
+		if ($application instanceof Application && !$application instanceof static) {
+			return parent::makeInstance($class, $application);
+		}
+
+		$engine = $application instanceof static
+			? $application
+			: static::instance($application);
+
+		return $engine->resolveForPhase($class, 'static');
 	}
 
 	public function resolve(string $class)

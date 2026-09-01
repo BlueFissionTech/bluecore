@@ -74,6 +74,37 @@ Owner: `AddOnManager`.
 
 Registration is guarded per add-on runtime key. A callback that re-enters active add-on loading receives a `registration_in_progress` status for the in-flight add-on, and its factory is not executed twice. Contribution filters run only after path containment and passive-data validation have completed; filters cannot make unsafe files eligible for loading.
 
+## Datasource lifecycle hooks
+
+Owner: `DatasourceManager`. Planning filters receive DevElation `Arr` values and may only reorder or remove entries discovered by BlueCore. They cannot add migration or population files, change the batch, change the iteration, or change automatic-population intent.
+
+| Constant and hook | Type | Payload or value | Contract |
+| --- | --- | --- | --- |
+| `DatasourceManager::FILTER_MIGRATION_PLAN`<br>`bluecore.datasource.migration.plan` | Filter | `Arr` with `operation`, `batch`, `iteration`, and `deltas` | Must return `Arr`. `deltas` may contain a unique reordered subset of discovered files. |
+| `DatasourceManager::HOOK_MIGRATION_BEFORE`<br>`bluecore.datasource.migration.before` | Action | `Arr $plan, DatasourceManager $manager` | Runs after plan validation and before migration execution. |
+| `DatasourceManager::HOOK_MIGRATION_AFTER`<br>`bluecore.datasource.migration.after` | Action | `Arr $result, DatasourceManager $manager` | Runs after successful execution, including a successful no-op. |
+| `DatasourceManager::HOOK_MIGRATION_FAILED`<br>`bluecore.datasource.migration.failed` | Action | `LifecycleFailure $failure` | Observes sanitized planning or execution failure metadata. |
+| `DatasourceManager::FILTER_POPULATION_PLAN`<br>`bluecore.datasource.population.plan` | Filter | `Arr` with `operation`, `auto`, and `generators` | Must return `Arr`. `generators` may contain a unique reordered subset of discovered files. |
+| `DatasourceManager::HOOK_POPULATION_BEFORE`<br>`bluecore.datasource.population.before` | Action | `Arr $plan, DatasourceManager $manager` | Runs after plan validation and before population execution. |
+| `DatasourceManager::HOOK_POPULATION_AFTER`<br>`bluecore.datasource.population.after` | Action | `Arr $result, DatasourceManager $manager` | Runs after successful execution, including a successful no-op. |
+| `DatasourceManager::HOOK_POPULATION_FAILED`<br>`bluecore.datasource.population.failed` | Action | `LifecycleFailure $failure` | Observes sanitized planning or execution failure metadata. |
+
+## Installation lifecycle hooks
+
+Owner: `InstallationExecutor`. Installation actions expose summaries only. Host context, approval evidence, stage evidence, exception messages, and checkpoint storage handles are not published through the global action surface.
+
+| Constant and hook | Phase | Payload | Contract |
+| --- | --- | --- | --- |
+| `InstallationExecutor::HOOK_PREPARE_AFTER`<br>`bluecore.installation.prepare.after` | Plan prepared | `Arr $summary, InstallationExecutor $executor` | Reports plan id, status, diagnostic count, and checkpoint count after persistence. |
+| `InstallationExecutor::HOOK_RESUME_AFTER`<br>`bluecore.installation.resume.after` | Plan resumed | `Arr $summary, InstallationExecutor $executor` | Runs only when a checkpoint resolves to a plan. |
+| `InstallationExecutor::HOOK_EXECUTE_BEFORE`<br>`bluecore.installation.execute.before` | Before execution | `Arr $summary, InstallationExecutor $executor` | Runs after approval and readiness checks succeed. |
+| `InstallationExecutor::HOOK_STAGE_BEFORE`<br>`bluecore.installation.stage.before` | Before stage | `Arr $summary, InstallationExecutor $executor` | Reports only plan id, status, and stage name. |
+| `InstallationExecutor::HOOK_STAGE_AFTER`<br>`bluecore.installation.stage.after` | Stage success | `Arr $summary, InstallationExecutor $executor` | Reports sanitized outcome flags without stage evidence. |
+| `InstallationExecutor::HOOK_STAGE_FAILED`<br>`bluecore.installation.stage.failed` | Stage failure | `LifecycleFailure $failure` | Observes sanitized stage failure metadata. |
+| `InstallationExecutor::HOOK_CHECKPOINTED`<br>`bluecore.installation.checkpoint.after` | Checkpoint recorded | `Arr $summary, InstallationExecutor $executor` | Runs after the in-memory checkpoint is recorded and before durable plan save. |
+| `InstallationExecutor::HOOK_EXECUTE_AFTER`<br>`bluecore.installation.execute.after` | Execution success | `Arr $summary, InstallationExecutor $executor` | Runs after completion is persisted. |
+| `InstallationExecutor::HOOK_EXECUTE_FAILED`<br>`bluecore.installation.execute.failed` | Execution failure | `LifecycleFailure $failure` | Observes sanitized readiness or stage failure metadata. |
+
 ```php
 use BlueFission\Arr;
 use BlueFission\BlueCore\Business\Managers\AddOnManager;
@@ -87,7 +118,12 @@ DevElation::up();
 
 DevElation::filter(
     DynamicGateway::FILTER_ARGUMENTS,
-    fn(array $arguments): Arr => Arr::make($arguments)->set('trace_enabled', true)
+    function (array $arguments): Arr {
+        $filtered = Arr::make($arguments);
+        $filtered->set('trace_enabled', true);
+
+        return $filtered;
+    }
 );
 
 DevElation::action(

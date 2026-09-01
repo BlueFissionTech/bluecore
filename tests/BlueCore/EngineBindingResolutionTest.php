@@ -5,6 +5,7 @@ namespace BlueFission\Tests\BlueCore;
 use BlueFission\BlueCore\Engine;
 use BlueFission\BlueCore\Registration\RegistrationResolutionException;
 use BlueFission\Services\Application;
+use BlueFission\Exceptions\DependencyResolutionException;
 use PHPUnit\Framework\TestCase;
 
 interface EngineBindingContract
@@ -86,6 +87,26 @@ final class EngineBindingResolutionTest extends TestCase
         $this->assertInstanceOf(EngineBindingImplementation::class, $resolved);
     }
 
+    public function testNamedInstanceUsesTheDevElationSelectionContract(): void
+    {
+        $first = new Engine(['name' => 'first-named-engine']);
+        $second = new Engine(['name' => 'second-named-engine']);
+		$first->bind(EngineBindingContract::class, EngineBindingImplementation::class);
+		$second->bind(EngineBindingContract::class, AlternateEngineBindingImplementation::class);
+
+        $this->assertSame($first, Engine::instance('first-named-engine'));
+        $this->assertSame($second, Engine::instance('second-named-engine'));
+        $this->assertSame($second, Engine::instance());
+		$this->assertInstanceOf(
+			EngineBindingImplementation::class,
+			Engine::makeInstance(EngineBindingContract::class, 'first-named-engine')
+		);
+		$this->assertInstanceOf(
+			AlternateEngineBindingImplementation::class,
+			Engine::makeInstance(EngineBindingContract::class, $second)
+		);
+    }
+
     public function testResolutionFailureNamesTheContractAndLifecyclePhase(): void
     {
         $engine = new Engine(['name' => 'diagnostic-engine']);
@@ -97,7 +118,10 @@ final class EngineBindingResolutionTest extends TestCase
             $this->assertSame(EngineBindingContract::class, $exception->diagnostic()['contract']);
             $this->assertSame('boot', $exception->diagnostic()['phase']);
             $this->assertSame(EngineBindingContract::class, $exception->diagnostic()['implementation']);
-            $this->assertSame(\Error::class, $exception->diagnostic()['exception_class']);
+            $this->assertSame(
+                DependencyResolutionException::class,
+                $exception->diagnostic()['exception_class']
+            );
             $this->assertStringContainsString(EngineBindingContract::class, $exception->getMessage());
             $this->assertStringContainsString('boot', $exception->getMessage());
         }

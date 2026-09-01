@@ -2,6 +2,8 @@
 namespace BlueFission\BlueCore\Business\Managers;
 
 use BlueFission\Services\Service;
+use BlueFission\BlueCore\Hooks\DispatchesLifecycleHooks;
+use BlueFission\BlueCore\Hooks\LifecycleFailure;
 use BlueFission\Collections\Collection;
 use BlueFission\Connections\Database\MySQLLink;
 use BlueFission\Data\Storage\Storage;
@@ -14,6 +16,16 @@ use BlueFission\Str;
 use BlueFission\Val;
 
 class DatasourceManager extends Service {
+	use DispatchesLifecycleHooks;
+
+	public const FILTER_MIGRATION_PLAN = 'bluecore.datasource.migration.plan';
+	public const HOOK_MIGRATION_BEFORE = 'bluecore.datasource.migration.before';
+	public const HOOK_MIGRATION_AFTER = 'bluecore.datasource.migration.after';
+	public const HOOK_MIGRATION_FAILED = 'bluecore.datasource.migration.failed';
+	public const FILTER_POPULATION_PLAN = 'bluecore.datasource.population.plan';
+	public const HOOK_POPULATION_BEFORE = 'bluecore.datasource.population.before';
+	public const HOOK_POPULATION_AFTER = 'bluecore.datasource.population.after';
+	public const HOOK_POPULATION_FAILED = 'bluecore.datasource.population.failed';
 
 	protected $_deltaDir = '';
 	protected $_generatorDir = '';
@@ -59,7 +71,12 @@ class DatasourceManager extends Service {
 		if (Flag::isFalse($this->deltaDirectoryExists())) {
 			$result->set('stage', 'complete');
 
-			return $result->toArray();
+			return $this->finalizeDatasourceResult(
+				$result,
+				'migration',
+				self::HOOK_MIGRATION_AFTER,
+				self::HOOK_MIGRATION_FAILED
+			);
 		}
 
 		$deltas = $this->loadDeltas();
@@ -72,11 +89,43 @@ class DatasourceManager extends Service {
 			->filter(fn ($delta) => Str::pos((string)$delta, '.') !== 0)
 			->values()
 			->toArray();
+		$plan = Arr::make([
+			'operation' => 'migration',
+			'batch' => $batch,
+			'iteration' => $iteration,
+			'deltas' => $deltas,
+		]);
+
+		try {
+			$plan = $this->filteredDatasourcePlan(
+				self::FILTER_MIGRATION_PLAN,
+				$plan,
+				'deltas'
+			);
+		} catch (\Throwable $exception) {
+			$result->set('ok', false);
+			$result->set('stage', 'planning');
+			$result->set('failed', 1);
+			$result->set('nextAction', 'review_migration_plan');
+			$result->set('error', $exception->getMessage());
+
+			return $this->finalizeDatasourceResult(
+				$result,
+				'migration',
+				self::HOOK_MIGRATION_AFTER,
+				self::HOOK_MIGRATION_FAILED,
+				$exception
+			);
+		}
+
+		$deltas = Arr::make($plan->get('deltas'))->toArray();
+		$this->dispatchLifecycleAction(self::HOOK_MIGRATION_BEFORE, [$plan, $this]);
 
 		$result->set('total', Arr::size($deltas));
 		$result->set('stage', 'migration');
 		$dbActive = $this->migrationTableExists();
 		$migrations = Arr::make([]);
+		$failureException = null;
 
 		foreach ($deltas as $delta) {
 			$migration = Arr::make([
@@ -91,8 +140,9 @@ class DatasourceManager extends Service {
 			$classname = $this->findClassName($this->_deltaDir . $delta);
 
 			if (Val::isEmpty($classname)) {
+				$failureException = new \RuntimeException('Migration class could not be resolved.');
 				$migration->set('status', 'missing_class');
-				$migration->set('error', 'Migration class could not be resolved.');
+				$migration->set('error', $failureException->getMessage());
 				$migrations->push($migration->toArray());
 				break;
 			}
@@ -114,6 +164,7 @@ class DatasourceManager extends Service {
 				$migration->set('ok', true);
 				$migration->set('status', 'applied');
 			} catch (\Throwable $exception) {
+				$failureException = $exception;
 				$status = 3;
 				$migration->set('status', 'failed');
 				$migration->set('error', $exception->getMessage());
@@ -157,7 +208,13 @@ class DatasourceManager extends Service {
 			$result->set('error', Arr::getPath($failure, 'error', 'Migration failed.'));
 		}
 
-		return $result->toArray();
+		return $this->finalizeDatasourceResult(
+			$result,
+			'migration',
+			self::HOOK_MIGRATION_AFTER,
+			self::HOOK_MIGRATION_FAILED,
+			$failureException
+		);
 	}
 
 	public function revertMigrations()
@@ -250,18 +307,61 @@ class DatasourceManager extends Service {
 		if (Flag::isFalse($this->generatorDirectoryExists())) {
 			$result->set('stage', 'complete');
 
-			return $result->toArray();
+			return $this->finalizeDatasourceResult(
+				$result,
+				'population',
+				self::HOOK_POPULATION_AFTER,
+				self::HOOK_POPULATION_FAILED
+			);
 		}
 
 		try {
 			$generators = $this->orderedGenerators($this->loadGenerators());
 		} catch (\Throwable $exception) {
-			return $this->failedPopulationResult($result, 'RootSeeder.php', $exception);
+			return $this->finalizeDatasourceResult(
+				Arr::make($this->failedPopulationResult($result, 'RootSeeder.php', $exception)),
+				'population',
+				self::HOOK_POPULATION_AFTER,
+				self::HOOK_POPULATION_FAILED,
+				$exception
+			);
 		}
+		$plan = Arr::make([
+			'operation' => 'population',
+			'auto' => Flag::parseBool($auto),
+			'generators' => $generators,
+		]);
+
+		try {
+			$plan = $this->filteredDatasourcePlan(
+				self::FILTER_POPULATION_PLAN,
+				$plan,
+				'generators'
+			);
+		} catch (\Throwable $exception) {
+			$result->set('ok', false);
+			$result->set('stage', 'planning');
+			$result->set('failed', 1);
+			$result->set('nextAction', 'review_population_plan');
+			$result->set('error', $exception->getMessage());
+			$result->set('results', []);
+
+			return $this->finalizeDatasourceResult(
+				$result,
+				'population',
+				self::HOOK_POPULATION_AFTER,
+				self::HOOK_POPULATION_FAILED,
+				$exception
+			);
+		}
+
+		$generators = Arr::make($plan->get('generators'))->toArray();
+		$this->dispatchLifecycleAction(self::HOOK_POPULATION_BEFORE, [$plan, $this]);
 
 		$result->set('total', Arr::size($generators));
 		$result->set('stage', 'population');
 		$outcomes = Arr::make([]);
+		$failureException = null;
 
 		foreach ($generators as $generator) {
 			$outcome = Arr::make([
@@ -288,6 +388,7 @@ class DatasourceManager extends Service {
 				$outcome->set('ok', true);
 				$outcome->set('status', 'populated');
 			} catch (\Throwable $exception) {
+				$failureException = $exception;
 				$outcome->set('status', 'failed');
 				$outcome->set('error', $exception->getMessage());
 				$outcome->set('exception', $exception::class);
@@ -318,7 +419,13 @@ class DatasourceManager extends Service {
 			$result->set('error', Arr::getPath($failure, 'error', 'Datasource population failed.'));
 		}
 
-		return $result->toArray();
+		return $this->finalizeDatasourceResult(
+			$result,
+			'population',
+			self::HOOK_POPULATION_AFTER,
+			self::HOOK_POPULATION_FAILED,
+			$failureException
+		);
 	}
 
 	protected function orderedGenerators(array $generators): array
@@ -348,6 +455,69 @@ class DatasourceManager extends Service {
 			->map(fn ($generator) => Str::endsWith((string)$generator, '.php') ? $generator : $generator . '.php')
 			->values()
 			->toArray();
+	}
+
+	private function filteredDatasourcePlan(string $hook, Arr $plan, string $itemsKey): Arr
+	{
+		$original = $plan->toArray();
+		$filtered = $this->applyLifecycleFilter($hook, $plan);
+
+		if (!$filtered instanceof Arr) {
+			throw new \UnexpectedValueException("{$hook} must return a DevElation Arr.");
+		}
+
+		foreach ($original as $key => $value) {
+			if ($key !== $itemsKey && $filtered->get($key) !== $value) {
+				throw new \UnexpectedValueException("{$hook} cannot change {$key}.");
+			}
+		}
+
+		$items = $filtered->get($itemsKey);
+		if (!Arr::is($items)) {
+			throw new \UnexpectedValueException("{$hook} must preserve {$itemsKey} as an array.");
+		}
+
+		$items = Arr::make($items)->values()->toArray();
+		if (Arr::make($items)->unique()->values()->toArray() !== $items) {
+			throw new \UnexpectedValueException("{$hook} cannot duplicate planned entries.");
+		}
+
+		$available = Arr::make(Arr::getPath($original, $itemsKey, []))->values()->toArray();
+		foreach ($items as $item) {
+			if (Flag::isFalse(Str::is($item)) || Flag::isFalse(Arr::has($available, $item, true))) {
+				throw new \UnexpectedValueException(
+					"{$hook} can only reorder or remove discovered entries."
+				);
+			}
+		}
+
+		$normalized = Arr::make($filtered->toArray());
+		$normalized->set($itemsKey, $items);
+
+		return $normalized;
+	}
+
+	private function finalizeDatasourceResult(
+		Arr $result,
+		string $operation,
+		string $afterHook,
+		string $failedHook,
+		?\Throwable $exception = null
+	): array {
+		if (Flag::parseBool($result->get('ok'))) {
+			$this->dispatchLifecycleAction($afterHook, [Arr::make($result->toArray()), $this]);
+		} else {
+			$exception ??= new \RuntimeException(
+				(string)(Val::isEmpty($result->get('error'))
+					? 'Datasource operation failed.'
+					: $result->get('error'))
+			);
+			$this->dispatchLifecycleAction($failedHook, [
+				new LifecycleFailure($failedHook, $operation, static::class, $exception),
+			]);
+		}
+
+		return $result->toArray();
 	}
 
 	private function failedPopulationResult(Arr $result, string $generator, \Throwable $exception): array

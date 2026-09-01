@@ -4,10 +4,22 @@ namespace BlueFission\Tests\BlueCore\Business\Managers;
 
 use BlueFission\Arr;
 use BlueFission\BlueCore\Business\Managers\DatasourceManager;
+use BlueFission\BlueCore\Hooks\LifecycleFailure;
+use BlueFission\DevElation as Dev;
 use PHPUnit\Framework\TestCase;
 
 class DatasourceManagerMigrationRunTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        $this->resetDevElation();
+    }
+
+    protected function tearDown(): void
+    {
+        $this->resetDevElation();
+    }
+
     public function testPendingMigrationsAreScopedByBatchAndRepeatAsNoOp(): void
     {
         $manager = new ExecutableDatasourceManager(['001_initial.php', '002_later.php']);
@@ -50,6 +62,80 @@ class DatasourceManagerMigrationRunTest extends TestCase
             ['001_initial.php', '002_retry.php', '003_after.php'],
             $manager->historyFor('retry-addon')
         );
+    }
+
+    public function testMigrationPlanFilterAndActionsUseTypedLifecyclePayloads(): void
+    {
+        $events = [];
+        $manager = new ExecutableDatasourceManager(['001_initial.php', '002_later.php']);
+        Dev::up();
+        Dev::filter(
+            DatasourceManager::FILTER_MIGRATION_PLAN,
+            function (Arr $plan) use (&$events): Arr {
+                $events[] = 'filter';
+				$filtered = Arr::make($plan->toArray());
+				$filtered->set('deltas', ['002_later.php']);
+
+				return $filtered;
+            }
+        );
+        Dev::action(
+            DatasourceManager::HOOK_MIGRATION_BEFORE,
+            function (Arr $plan) use (&$events): void {
+                $events[] = 'before';
+                $this->assertSame(['002_later.php'], $plan->get('deltas'));
+            }
+        );
+        Dev::action(
+            DatasourceManager::HOOK_MIGRATION_AFTER,
+            function (Arr $result) use (&$events): void {
+                $events[] = 'after';
+                $this->assertSame(1, $result->get('applied'));
+            }
+        );
+
+        $result = $manager->runMigrations('filtered');
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(['002_later.php'], $manager->historyFor('filtered'));
+        $this->assertSame(['filter', 'before', 'after'], $events);
+    }
+
+    public function testInvalidMigrationPlanFilterReturnsStructuredFailure(): void
+    {
+        $failure = null;
+        $manager = new ExecutableDatasourceManager(['001_initial.php']);
+        Dev::up();
+        Dev::filter(DatasourceManager::FILTER_MIGRATION_PLAN, fn (): array => []);
+        Dev::action(
+            DatasourceManager::HOOK_MIGRATION_FAILED,
+            function (LifecycleFailure $context) use (&$failure): void {
+                $failure = $context;
+            }
+        );
+
+        $result = $manager->runMigrations('invalid-filter');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('planning', $result['stage']);
+        $this->assertSame('review_migration_plan', $result['nextAction']);
+        $this->assertInstanceOf(LifecycleFailure::class, $failure);
+        $this->assertSame(
+            DatasourceManager::HOOK_MIGRATION_FAILED,
+            $failure->hook()
+        );
+        $this->assertSame([], $manager->historyFor('invalid-filter'));
+    }
+
+    private function resetDevElation(): void
+    {
+        Dev::down();
+        $reflection = new \ReflectionClass(Dev::class);
+
+        foreach (['_filters', '_actions', '_listeners', '_config'] as $propertyName) {
+            $property = $reflection->getProperty($propertyName);
+            $property->setValue(null, []);
+        }
     }
 }
 
