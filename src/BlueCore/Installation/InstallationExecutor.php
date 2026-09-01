@@ -4,6 +4,8 @@ namespace BlueFission\BlueCore\Installation;
 
 use BlueFission\Arr;
 use BlueFission\BlueCore\Contracts\IInstallationCheckpointStore;
+use BlueFission\BlueCore\Hooks\DispatchesLifecycleHooks;
+use BlueFission\BlueCore\Hooks\LifecycleFailure;
 use BlueFission\Collections\Collection;
 use BlueFission\Flag;
 use BlueFission\Func;
@@ -12,6 +14,18 @@ use BlueFission\Val;
 
 class InstallationExecutor
 {
+    use DispatchesLifecycleHooks;
+
+    public const HOOK_PREPARE_AFTER = 'bluecore.installation.prepare.after';
+    public const HOOK_RESUME_AFTER = 'bluecore.installation.resume.after';
+    public const HOOK_EXECUTE_BEFORE = 'bluecore.installation.execute.before';
+    public const HOOK_EXECUTE_AFTER = 'bluecore.installation.execute.after';
+    public const HOOK_EXECUTE_FAILED = 'bluecore.installation.execute.failed';
+    public const HOOK_STAGE_BEFORE = 'bluecore.installation.stage.before';
+    public const HOOK_STAGE_AFTER = 'bluecore.installation.stage.after';
+    public const HOOK_STAGE_FAILED = 'bluecore.installation.stage.failed';
+    public const HOOK_CHECKPOINTED = 'bluecore.installation.checkpoint.after';
+
     private Collection $stages;
     private ?Func $validator = null;
     private bool $approvalRequired = false;
@@ -72,6 +86,10 @@ class InstallationExecutor
             $plan->applyDiagnostics($this->validate($context));
         }
         $this->save($plan);
+        $this->dispatchLifecycleAction(self::HOOK_PREPARE_AFTER, [
+            $this->planSummary($plan),
+            $this,
+        ]);
 
         return $plan;
     }
@@ -83,14 +101,38 @@ class InstallationExecutor
         }
 
         $checkpoint = $this->checkpoints->load($planId);
+        $plan = Val::isNull($checkpoint) ? null : InstallationPlan::restore($checkpoint);
 
-        return Val::isNull($checkpoint) ? null : InstallationPlan::restore($checkpoint);
+        if (Val::isNotNull($plan)) {
+            $this->dispatchLifecycleAction(self::HOOK_RESUME_AFTER, [
+                $this->planSummary($plan),
+                $this,
+            ]);
+        }
+
+        return $plan;
     }
 
     public function execute(InstallationPlan $plan): array
     {
-        $plan->start($this->approvalRequired);
+        try {
+            $plan->start($this->approvalRequired);
+        } catch (\Throwable $exception) {
+            $this->dispatchInstallationFailure(
+                self::HOOK_EXECUTE_FAILED,
+                'execute',
+                self::class,
+                $exception
+            );
+
+            throw $exception;
+        }
+
         $this->save($plan);
+        $this->dispatchLifecycleAction(self::HOOK_EXECUTE_BEFORE, [
+            $this->planSummary($plan),
+            $this,
+        ]);
 
         foreach ($this->stages as $stage) {
             $stage = Arr::make($stage);
@@ -100,10 +142,17 @@ class InstallationExecutor
             }
 
             $operation = $stage->get('operation');
+            $stageFailure = null;
+            $this->dispatchLifecycleAction(self::HOOK_STAGE_BEFORE, [
+                $this->stageSummary($plan, $name),
+                $this,
+            ]);
+
             try {
                 $raw = $operation instanceof Func ? $operation->call($plan) : null;
                 $outcome = $this->outcome($name, $raw);
             } catch (\Throwable $exception) {
+                $stageFailure = $exception;
                 $outcome = $this->outcome($name, [
                     'ok' => false,
                     'changed' => false,
@@ -113,12 +162,40 @@ class InstallationExecutor
                 ]);
             }
 
+            if (Flag::make(Arr::getPath($outcome, 'ok', false))->isFalse()) {
+                $stageFailure ??= new \RuntimeException(
+                    (string)Arr::getPath($outcome, 'error', 'Installation stage failed.')
+                );
+                $this->dispatchInstallationFailure(
+                    self::HOOK_STAGE_FAILED,
+                    'stage',
+                    $name,
+                    $stageFailure
+                );
+            } else {
+                $this->dispatchLifecycleAction(self::HOOK_STAGE_AFTER, [
+                    $this->outcomeSummary($plan, $outcome),
+                    $this,
+                ]);
+            }
+
             $plan->checkpoint($name, $outcome);
+            $this->dispatchLifecycleAction(self::HOOK_CHECKPOINTED, [
+                $this->outcomeSummary($plan, $outcome),
+                $this,
+            ]);
             if (Flag::make(Arr::getPath($outcome, 'ok', false))->isFalse()) {
                 $plan->fail($name, $outcome);
                 $this->save($plan);
+                $result = $this->result($plan, false);
+                $this->dispatchInstallationFailure(
+                    self::HOOK_EXECUTE_FAILED,
+                    'execute',
+                    self::class,
+                    $stageFailure ?? new \RuntimeException('Installation execution failed.')
+                );
 
-                return $this->result($plan, false);
+                return $result;
             }
 
             $this->save($plan);
@@ -126,8 +203,59 @@ class InstallationExecutor
 
         $plan->complete();
         $this->save($plan);
+        $result = $this->result($plan, true);
+        $this->dispatchLifecycleAction(self::HOOK_EXECUTE_AFTER, [
+            $this->planSummary($plan),
+            $this,
+        ]);
 
-        return $this->result($plan, true);
+        return $result;
+    }
+
+    private function planSummary(InstallationPlan $plan): Arr
+    {
+        $data = $plan->toArray();
+
+        return Arr::make([
+            'plan_id' => $plan->id(),
+            'status' => $plan->status(),
+            'diagnostic_count' => Arr::size($plan->diagnostics()),
+            'checkpoint_count' => Arr::size(Arr::getPath($data, 'checkpoints', [])),
+        ]);
+    }
+
+    private function stageSummary(InstallationPlan $plan, string $stage): Arr
+    {
+        return Arr::make([
+            'plan_id' => $plan->id(),
+            'status' => $plan->status(),
+            'stage' => $stage,
+        ]);
+    }
+
+    private function outcomeSummary(InstallationPlan $plan, array $outcome): Arr
+    {
+        return Arr::make([
+            'plan_id' => $plan->id(),
+            'status' => $plan->status(),
+            'stage' => Arr::getPath($outcome, 'stage'),
+            'ok' => Flag::parseBool(Arr::getPath($outcome, 'ok', false)),
+            'changed' => Flag::parseBool(Arr::getPath($outcome, 'changed', false)),
+            'skipped' => Flag::parseBool(Arr::getPath($outcome, 'skipped', false)),
+            'next_action' => Arr::getPath($outcome, 'nextAction'),
+            'exception_type' => Arr::getPath($outcome, 'exception'),
+        ]);
+    }
+
+    private function dispatchInstallationFailure(
+        string $hook,
+        string $operation,
+        string $dispatcher,
+        \Throwable $exception
+    ): void {
+        $this->dispatchLifecycleAction($hook, [
+            new LifecycleFailure($hook, $operation, $dispatcher, $exception),
+        ]);
     }
 
     private function validate(array $context): array

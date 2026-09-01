@@ -52,7 +52,7 @@ final class ComposerMetadataTest extends TestCase
     {
         $composer = $this->composer();
 
-        $this->assertSame('^1.3.41', $composer['require']['bluefission/develation']);
+        $this->assertSame('^1.3.44', $composer['require']['bluefission/develation']);
     }
 
     public function testPackageArchiveExcludesDevelopmentFiles(): void
@@ -103,7 +103,7 @@ final class ComposerMetadataTest extends TestCase
             $readme->has('composer require bluefission/bluecore:^0.1.4@alpha')
         );
         $this->assertTrue($release->has('bluefission/bluecore:^0.1.4@alpha'));
-        $this->assertTrue($release->has('DevElation `^1.3.41`'));
+        $this->assertTrue($release->has('DevElation `^1.3.44`'));
         $this->assertTrue($release->has('Packagist resolves the tag to the same commit'));
     }
 

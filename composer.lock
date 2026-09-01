@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "4985f677a975d6caca1d7582966070cf",
+    "content-hash": "ac2f5ed79df53ac71cc173440b1abb2b",
     "packages": [
         {
             "name": "bluefission/develation",
-            "version": "v1.3.41",
+            "version": "v1.3.44",
             "source": {
                 "type": "git",
                 "url": "https://github.com/BlueFissionTech/develation.git",
-                "reference": "25bdd65152ef39a83524b30eb47cba2c061ded91"
+                "reference": "096a10250164227662134f996f6ddd083605a5c7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/BlueFissionTech/develation/zipball/25bdd65152ef39a83524b30eb47cba2c061ded91",
-                "reference": "25bdd65152ef39a83524b30eb47cba2c061ded91",
+                "url": "https://api.github.com/repos/BlueFissionTech/develation/zipball/096a10250164227662134f996f6ddd083605a5c7",
+                "reference": "096a10250164227662134f996f6ddd083605a5c7",
                 "shasum": ""
             },
             "require": {
@@ -33,7 +33,11 @@
                 "phpunit/phpunit": "^11.5"
             },
             "suggest": {
-                "cboden/ratchet": "Install to use the optional BlueFission\\Async\\Sock Ratchet websocket transport."
+                "cboden/ratchet": "Install to use the optional BlueFission\\Async\\Sock Ratchet websocket transport.",
+                "ext-memcached": "Install to use Memcached storage and MemQueue.",
+                "ext-mongodb": "Install with mongodb/mongodb to use the MongoLink database adapter.",
+                "ext-redis": "Install to use Redis connections, storage, and reliable queues.",
+                "mongodb/mongodb": "Install with ext-mongodb to use the MongoLink database adapter."
             },
             "type": "library",
             "autoload": {
@@ -76,7 +80,7 @@
                 "issues": "https://github.com/BlueFissionTech/develation/issues",
                 "source": "https://github.com/BlueFissionTech/develation"
             },
-            "time": "2026-08-07T19:31:33+00:00"
+            "time": "2026-08-31T20:50:17+00:00"
         },
         {
             "name": "composer/installers",

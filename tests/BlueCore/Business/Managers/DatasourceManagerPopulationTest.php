@@ -4,10 +4,21 @@ namespace BlueFission\Tests\BlueCore\Business\Managers;
 
 use BlueFission\Arr;
 use BlueFission\BlueCore\Business\Managers\DatasourceManager;
+use BlueFission\DevElation as Dev;
 use PHPUnit\Framework\TestCase;
 
 class DatasourceManagerPopulationTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        $this->resetDevElation();
+    }
+
+    protected function tearDown(): void
+    {
+        $this->resetDevElation();
+    }
+
     public function testMissingGeneratorDirectoryReturnsStructuredNoOp(): void
     {
         $result = (new ExecutablePopulationManager([], directoryExists: false))->populate();
@@ -58,6 +69,57 @@ class DatasourceManagerPopulationTest extends TestCase
         $this->assertSame(['FirstSeeder.php', 'FailingSeeder.php'], $manager->populated());
         $this->assertSame('failed', $result['results'][1]['status']);
         $this->assertSame(\RuntimeException::class, $result['results'][1]['exception']);
+    }
+
+    public function testPopulationPlanFilterAndActionsUseTypedLifecyclePayloads(): void
+    {
+        $events = [];
+        $manager = new ExecutablePopulationManager([
+            'FirstSeeder.php',
+            'SecondSeeder.php',
+        ]);
+        Dev::up();
+        Dev::filter(
+            DatasourceManager::FILTER_POPULATION_PLAN,
+            function (Arr $plan) use (&$events): Arr {
+                $events[] = 'filter';
+                $filtered = Arr::make($plan->toArray());
+                $filtered->set('generators', ['SecondSeeder.php']);
+
+                return $filtered;
+            }
+        );
+        Dev::action(
+            DatasourceManager::HOOK_POPULATION_BEFORE,
+            function (Arr $plan) use (&$events): void {
+                $events[] = 'before';
+                $this->assertSame(['SecondSeeder.php'], $plan->get('generators'));
+            }
+        );
+        Dev::action(
+            DatasourceManager::HOOK_POPULATION_AFTER,
+            function (Arr $result) use (&$events): void {
+                $events[] = 'after';
+                $this->assertSame(1, $result->get('populated'));
+            }
+        );
+
+        $result = $manager->populate(true);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(['SecondSeeder.php'], $manager->populated());
+        $this->assertSame(['filter', 'before', 'after'], $events);
+    }
+
+    private function resetDevElation(): void
+    {
+        Dev::down();
+        $reflection = new \ReflectionClass(Dev::class);
+
+        foreach (['_filters', '_actions', '_listeners', '_config'] as $propertyName) {
+            $property = $reflection->getProperty($propertyName);
+            $property->setValue(null, []);
+        }
     }
 }
 

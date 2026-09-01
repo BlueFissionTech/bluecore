@@ -3,10 +3,12 @@
 namespace BlueFission\Tests\BlueCore\Installation;
 
 use BlueFission\Arr;
+use BlueFission\BlueCore\Hooks\LifecycleFailure;
 use BlueFission\BlueCore\Installation\InstallationExecutor;
 use BlueFission\BlueCore\Installation\InstallationPlan;
 use BlueFission\BlueCore\Installation\JsonInstallationCheckpointStore;
 use BlueFission\Data\FileSystem;
+use BlueFission\DevElation as Dev;
 use BlueFission\Str;
 use BlueFission\Utils\File;
 use BlueFission\Utils\Path;
@@ -18,6 +20,7 @@ class InstallationExecutorTest extends TestCase
 
     protected function setUp(): void
     {
+        $this->resetDevElation();
         $this->checkpointDirectory = Path::ensureDir(
             Path::normalize(
                 sys_get_temp_dir().DIRECTORY_SEPARATOR.'bluecore-installation-'.Str::rand('', 10)
@@ -27,6 +30,7 @@ class InstallationExecutorTest extends TestCase
 
     protected function tearDown(): void
     {
+        $this->resetDevElation();
         if (!FileSystem::directoryExists($this->checkpointDirectory)) {
             return;
         }
@@ -184,10 +188,93 @@ class InstallationExecutorTest extends TestCase
         (new InstallationExecutor())->resume('missing');
     }
 
+    public function testInstallationActionsExposeSanitizedLifecycleSummaries(): void
+    {
+        $events = [];
+        Dev::up();
+        Dev::action(
+            InstallationExecutor::HOOK_PREPARE_AFTER,
+            function (Arr $summary) use (&$events): void {
+                $events[] = 'prepared';
+                $this->assertFalse($summary->hasKey('context'));
+            }
+        );
+        Dev::action(InstallationExecutor::HOOK_EXECUTE_BEFORE, function () use (&$events): void {
+            $events[] = 'execute-before';
+        });
+        Dev::action(InstallationExecutor::HOOK_STAGE_BEFORE, function () use (&$events): void {
+            $events[] = 'stage-before';
+        });
+        Dev::action(InstallationExecutor::HOOK_STAGE_AFTER, function () use (&$events): void {
+            $events[] = 'stage-after';
+        });
+        Dev::action(InstallationExecutor::HOOK_CHECKPOINTED, function (Arr $summary) use (&$events): void {
+            $events[] = 'checkpointed';
+            $this->assertFalse($summary->hasKey('evidence'));
+        });
+        Dev::action(InstallationExecutor::HOOK_EXECUTE_AFTER, function () use (&$events): void {
+            $events[] = 'execute-after';
+        });
+        $executor = (new InstallationExecutor())->stage('configured', fn (): bool => true);
+
+        $result = $executor->execute($executor->prepare(['secret' => 'not-published'], 'hooks'));
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame([
+            'prepared',
+            'execute-before',
+            'stage-before',
+            'stage-after',
+            'checkpointed',
+            'execute-after',
+        ], $events);
+    }
+
+    public function testInstallationFailureActionsUseSanitizedFailureContext(): void
+    {
+        $failures = [];
+        Dev::up();
+        Dev::action(
+            InstallationExecutor::HOOK_STAGE_FAILED,
+            function (LifecycleFailure $failure) use (&$failures): void {
+                $failures[] = $failure;
+            }
+        );
+        Dev::action(
+            InstallationExecutor::HOOK_EXECUTE_FAILED,
+            function (LifecycleFailure $failure) use (&$failures): void {
+                $failures[] = $failure;
+            }
+        );
+        $executor = (new InstallationExecutor())->stage(
+            'failing',
+            fn () => throw new \RuntimeException('sensitive failure detail')
+        );
+
+        $result = $executor->execute($executor->prepare());
+
+        $this->assertFalse($result['ok']);
+        $this->assertCount(2, $failures);
+        $this->assertSame('failing', $failures[0]->dispatcher());
+        $this->assertSame(InstallationExecutor::class, $failures[1]->dispatcher());
+        $this->assertArrayNotHasKey('message', $failures[0]->data());
+    }
+
     private function executor(): InstallationExecutor
     {
         return new InstallationExecutor(
             new JsonInstallationCheckpointStore($this->checkpointDirectory)
         );
+    }
+
+    private function resetDevElation(): void
+    {
+        Dev::down();
+        $reflection = new \ReflectionClass(Dev::class);
+
+        foreach (['_filters', '_actions', '_listeners', '_config'] as $propertyName) {
+            $property = $reflection->getProperty($propertyName);
+            $property->setValue(null, []);
+        }
     }
 }
