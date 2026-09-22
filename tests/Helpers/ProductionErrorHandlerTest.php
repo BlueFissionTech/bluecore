@@ -108,6 +108,116 @@ class ProductionErrorHandlerTest extends TestCase
         }
     }
 
+    public function testSuppressedWarningIsNotReclassifiedAsFatalAtShutdown(): void
+    {
+        $result = $this->runShutdownFixture('suppressed-warning', false);
+
+        $this->assertSame(0, $result['exitCode']);
+        $this->assertSame('completed', $result['output']);
+        $this->assertStringNotContainsString('Fatal Error:', $result['errorLog']);
+        $this->assertSame('', $result['fatalEvidence']);
+    }
+
+    public function testHandledWarningIsNotReclassifiedAsFatalAtShutdown(): void
+    {
+        $result = $this->runShutdownFixture('handled-warning', false);
+
+        $this->assertSame(0, $result['exitCode']);
+        $this->assertSame('completed', $result['output']);
+        $this->assertStringContainsString('Error: [' . E_USER_WARNING . '] handled warning', $result['errorLog']);
+        $this->assertStringNotContainsString('Fatal Error:', $result['errorLog']);
+        $this->assertSame('', $result['fatalEvidence']);
+    }
+
+    public function testProductionFatalShutdownReportsDiagnosticAndLifecycleEvidenceOnce(): void
+    {
+        $result = $this->runShutdownFixture('fatal', false);
+
+        $this->assertNotSame(0, $result['exitCode']);
+        $this->assertSame('', $result['output']);
+        $this->assertSame(1, substr_count($result['errorLog'], 'Fatal Error: [' . E_ERROR . ']'));
+        $this->assertStringContainsString('Call to undefined function', $result['errorLog']);
+        $this->assertStringContainsString('"kind":"fatal"', $result['fatalEvidence']);
+        $this->assertStringContainsString('"code":' . E_ERROR, $result['fatalEvidence']);
+        $this->assertStringContainsString('"debug":false', $result['fatalEvidence']);
+    }
+
+    public function testDebugFatalShutdownAddsCliOutputWithoutDuplicatingLifecycleEvidence(): void
+    {
+        $result = $this->runShutdownFixture('fatal', true);
+
+        $this->assertNotSame(0, $result['exitCode']);
+        $this->assertStringContainsString(
+            'Fatal Error: Uncaught Error: Call to undefined function',
+            $result['output']
+        );
+        $this->assertSame(1, substr_count($result['errorLog'], 'Fatal Error: [' . E_ERROR . ']'));
+        $this->assertStringContainsString('"kind":"fatal"', $result['fatalEvidence']);
+        $this->assertStringContainsString('"code":' . E_ERROR, $result['fatalEvidence']);
+        $this->assertStringContainsString('"debug":true', $result['fatalEvidence']);
+    }
+
+    /**
+     * @return array{exitCode: int, output: string, errorLog: string, fatalEvidence: string}
+     */
+    private function runShutdownFixture(string $mode, bool $debug): array
+    {
+        $root = Path::normalize(dirname(__DIR__, 2));
+        $fixture = Path::normalize(
+            $root
+            . DIRECTORY_SEPARATOR
+            . 'tests'
+            . DIRECTORY_SEPARATOR
+            . 'Fixtures'
+            . DIRECTORY_SEPARATOR
+            . 'runtime-shutdown-error.php'
+        );
+        $token = Str::rand('', 10);
+        $errorLog = Path::normalize(
+            sys_get_temp_dir() . DIRECTORY_SEPARATOR . "bluecore-shutdown-{$token}.log"
+        );
+        $evidencePath = Path::normalize(
+            sys_get_temp_dir() . DIRECTORY_SEPARATOR . "bluecore-shutdown-evidence-{$token}.json"
+        );
+        $command = Str::make(escapeshellarg(PHP_BINARY))
+            ->append(' -d ')
+            ->append(escapeshellarg('display_errors=' . ($debug ? '1' : '0')))
+            ->append(' ')
+            ->append(escapeshellarg($fixture))
+            ->append(' ')
+            ->append(escapeshellarg($mode))
+            ->append(' ')
+            ->append(escapeshellarg($evidencePath))
+            ->val();
+        $process = new Process($command, $root, ['DEBUG_MODE' => $debug ? 'true' : 'false'], [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['file', $errorLog, 'a'],
+        ]);
+
+        try {
+            $process->start();
+            while ($process->status() === true) {
+                usleep(10000);
+            }
+
+            $output = $process->output();
+            $exitCode = $process->close();
+            $errorOutput = (new File())->exists($errorLog) ? File::readContents($errorLog) : '';
+            $fatalEvidence = (new File())->exists($evidencePath) ? File::readContents($evidencePath) : '';
+
+            return Arr::make([
+                'exitCode' => $exitCode,
+                'output' => $output,
+                'errorLog' => $errorOutput,
+                'fatalEvidence' => $fatalEvidence,
+            ])->toArray();
+        } finally {
+            File::deletePath($errorLog);
+            File::deletePath($evidencePath);
+        }
+    }
+
     private function resetDevElation(): void
     {
         Dev::down();
