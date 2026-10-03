@@ -9,6 +9,7 @@ php examples/file-path-utilities.php
 php examples/sqlite-model.php
 php examples/generator-factory.php
 php examples/menu-composition.php
+php examples/lifecycle-hooks.php
 ```
 
 The normal CI lint command also parses the examples:
@@ -23,3 +24,4 @@ composer lint
 - `sqlite-model.php` shows a minimal `ModelSQLite` aggregate with deterministic temporary storage.
 - `generator-factory.php` shows how to inject generation dependencies and request concrete generator types without requiring network-backed AI services.
 - `menu-composition.php` shows menu and nested menu-item composition without requiring theme rendering.
+- `lifecycle-hooks.php` shows response filters, bounded lifecycle actions, and the prepared-response event.
