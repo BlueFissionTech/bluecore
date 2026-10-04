@@ -48,6 +48,38 @@ class DatasourceManagerRevertTest extends TestCase
         $this->assertSame([2, 1], array_column($manager->storage->deleted, 'iteration'));
     }
 
+    public function testFluentOrderingPreservesNameTieBreakAndArrayReceipt(): void
+    {
+        $older = $this->record('older.php');
+        $manager = new RevertTestManager([
+            $this->record('alpha.php', 2, 'core', 7),
+            $older,
+            $this->record('zulu.php', 2, 'core', 7),
+        ]);
+
+        $result = $manager->revertMigrations();
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(2, $result['total']);
+        $this->assertSame(['zulu.php', 'alpha.php'], $manager->calls);
+        $this->assertSame([0, 1], array_keys($result['results']));
+        $this->assertSame([$older], $manager->storage->rows);
+    }
+
+    public function testNonStringHistoryNameFailsBeforeAnyRevert(): void
+    {
+        $row = $this->record('last.php');
+        $row['name'] = 42;
+        $manager = new RevertTestManager([$row]);
+
+        $result = $manager->revertMigrations();
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame(\UnexpectedValueException::class, $result['exception']);
+        $this->assertSame([], $manager->calls);
+        $this->assertSame([], $manager->storage->deleted);
+    }
+
     public function testErrorRetainsFailedAndUnattemptedHistoryAfterPartialSuccess(): void
     {
         $first = $this->record('first.php');

@@ -244,7 +244,7 @@ class DatasourceManager extends Service {
 			return $this->revertDiscoveryFailure($result, $exception);
 		}
 
-		$result['total'] = count($records);
+		$result['total'] = Arr::size($records);
 		if ($records === []) {
 			$result['reason'] = 'empty_history';
 			return $result;
@@ -332,7 +332,7 @@ class DatasourceManager extends Service {
 
 	private function revertRecords(array $rows, ?string $batch, bool $latestOnly): array
 	{
-		$records = [];
+		$records = Arr::make([]);
 		foreach ($rows as $row) {
 			if ((int)$this->migrationField($row, 'status', 0) !== 2) {
 				continue;
@@ -343,24 +343,27 @@ class DatasourceManager extends Service {
 			}
 			$name = $this->migrationField($row, 'name');
 			$iteration = (int)$this->migrationField($row, 'iteration', 0);
-			if (!is_string($name) || $name === '' || basename($name) !== $name
+			if (!Str::is($name) || $name === '' || basename($name) !== $name
 				|| strpbrk($name, "/\\\0") !== false || $name[0] === '.' || $iteration < 1 || $rowBatch === '') {
 				throw new \UnexpectedValueException('Successful migration history contains an invalid record.');
 			}
-			$records[] = [
+			$records->push([
 				'name' => $name, 'batch' => $rowBatch, 'iteration' => $iteration,
 				'migrationId' => $this->migrationField($row, 'migration_id'),
-			];
+			]);
 		}
-		usort($records, fn ($left, $right) =>
+		$records = $records->sort(fn ($left, $right) =>
 			($right['iteration'] <=> $left['iteration'])
 			?: ((int)$right['migrationId'] <=> (int)$left['migrationId'])
-			?: strcmp($right['name'], $left['name']));
-		if ($latestOnly && $records !== []) {
-			$iteration = $records[0]['iteration'];
-			$records = array_values(array_filter($records, fn ($row) => $row['iteration'] === $iteration));
+			?: strcmp($right['name'], $left['name']))
+			->values();
+		if ($latestOnly && $records->isNotEmpty()) {
+			$iteration = Arr::getPath($records->toArray(), '0.iteration');
+			$records = $records
+				->filter(fn ($row) => $row['iteration'] === $iteration)
+				->values();
 		}
-		return $records;
+		return $records->toArray();
 	}
 
 	protected function deleteRevertHistory(array $record): void
