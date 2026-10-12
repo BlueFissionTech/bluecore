@@ -167,6 +167,31 @@ class PathTest extends TestCase
         $this->assertSame('invalid_path', Path::canonicalize(null)['reason']);
     }
 
+    public function testCanonicalizePreservesRepeatedSegmentsAndStringableInputs(): void
+    {
+        $root = Path::ensureDir($this->tmpDir . DIRECTORY_SEPARATOR . 'root');
+        $input = new class implements \Stringable {
+            public function __toString(): string { return 'same/same/file.txt'; }
+        };
+        $receipt = Path::canonicalize($input, $root);
+        $this->assertTrue($receipt['resolved']);
+        $this->assertSame('same/same/file.txt', $receipt['inputPath']);
+        $this->assertSame(Path::normalize(realpath($root) . '/same/same/file.txt'), $receipt['canonicalPath']);
+        $this->assertFalse($receipt['exists']);
+    }
+
+    public function testCanonicalizeFailsClosedForThrowingStringableAndLeadingNullByte(): void
+    {
+        $input = new class implements \Stringable {
+            public function __toString(): string { throw new \RuntimeException('unavailable'); }
+        };
+        foreach ([$input, "\0bad", 123, []] as $path) {
+            $receipt = Path::canonicalize($path);
+            $this->assertFalse($receipt['resolved']);
+            $this->assertSame('invalid_path', $receipt['reason']);
+        }
+    }
+
     public function testContainmentAcceptsRootExistingAndPendingDescendants(): void
     {
         $root = Path::ensureDir($this->tmpDir . DIRECTORY_SEPARATOR . 'root');

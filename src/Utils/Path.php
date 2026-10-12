@@ -323,13 +323,13 @@ class Path extends Directory
 
     private static function pathString($path): ?string
     {
-        if (is_string($path)) {
+        if (Str::is($path)) {
             return $path;
         }
 
         if (is_object($path) && method_exists($path, '__toString')) {
             try {
-                return (string)$path;
+                return (new Func(static fn (): string => (string)$path))->call();
             } catch (\Throwable) {
                 return null;
             }
@@ -340,7 +340,7 @@ class Path extends Directory
 
     private static function invalidPathReason(?string $path): ?string
     {
-        if ($path === null || $path === '' || strpos($path, "\0") !== false) {
+        if ($path === null || $path === '' || Str::pos($path, "\0") !== false) {
             return 'invalid_path';
         }
 
@@ -392,7 +392,7 @@ class Path extends Directory
 
     private static function lexicalAbsolutePath(string $path): ?string
     {
-        $portable = str_replace('\\', '/', $path);
+        $portable = Str::replace($path, '\\', '/');
         $prefix = null;
         $rest = '';
 
@@ -400,7 +400,7 @@ class Path extends Directory
             $prefix = '//' . $matches[1] . '/' . $matches[2];
             $rest = $matches[3] ?? '';
         } elseif (preg_match('#^([A-Za-z]):/(.*)$#', $portable, $matches) === 1) {
-            $prefix = strtoupper($matches[1]) . ':';
+            $prefix = Str::upper($matches[1]) . ':';
             $rest = $matches[2];
         } elseif (Str::startsWith($portable, '/')) {
             $prefix = '/';
@@ -411,18 +411,18 @@ class Path extends Directory
             return null;
         }
 
-        $segments = [];
-        foreach (explode('/', $rest) as $segment) {
+        $segments = Arr::make([]);
+        foreach (Str::make($rest)->split('/') as $segment) {
             if ($segment === '' || $segment === '.') {
                 continue;
             }
 
             if ($segment === '..') {
-                if ($segments === []) {
+                if ($segments->isEmpty()) {
                     return null;
                 }
 
-                array_pop($segments);
+                $segments->pop();
                 continue;
             }
 
@@ -430,11 +430,11 @@ class Path extends Directory
         }
 
         if ($prefix === '/') {
-            $resolved = '/' . implode('/', $segments);
+            $resolved = '/' . $segments->join('/')->val();
         } elseif (preg_match('/^[A-Z]:$/', $prefix) === 1) {
-            $resolved = $prefix . '/' . implode('/', $segments);
+            $resolved = $prefix . '/' . $segments->join('/')->val();
         } else {
-            $resolved = $prefix . ($segments === [] ? '' : '/' . implode('/', $segments));
+            $resolved = $prefix . ($segments->isEmpty() ? '' : '/' . $segments->join('/')->val());
         }
 
         return self::normalize($resolved);
@@ -442,14 +442,14 @@ class Path extends Directory
 
     private static function volumeKey(string $path): ?string
     {
-        $portable = str_replace('\\', '/', $path);
+        $portable = Str::replace($path, '\\', '/');
 
         if (preg_match('#^([A-Za-z]):/#', $portable, $matches) === 1) {
-            return strtoupper($matches[1]) . ':';
+            return Str::upper($matches[1]) . ':';
         }
 
         if (preg_match('#^//+([^/]+)/+([^/]+)#', $portable, $matches) === 1) {
-            return '//' . strtolower($matches[1]) . '/' . strtolower($matches[2]);
+            return '//' . Str::lower($matches[1]) . '/' . Str::lower($matches[2]);
         }
 
         return Str::startsWith($portable, '/') ? '/' : null;
@@ -459,18 +459,18 @@ class Path extends Directory
     {
         return $left !== null
             && $right !== null
-            && strtolower($left) === strtolower($right);
+            && Str::lower($left) === Str::lower($right);
     }
 
     private static function comparisonPath(string $path): string
     {
-        $portable = str_replace('\\', '/', $path);
+        $portable = Str::replace($path, '\\', '/');
         $portable = rtrim($portable, '/');
         if ($portable === '') {
             $portable = '/';
         }
 
-        return DIRECTORY_SEPARATOR === '\\' ? strtolower($portable) : $portable;
+        return DIRECTORY_SEPARATOR === '\\' ? Str::lower($portable) : $portable;
     }
 
     private static function pathResolution(
