@@ -114,80 +114,118 @@ class SQLiteModelStore
 
     public function write()
     {
+        $this->_status = Storage::STATUS_FAILED;
         $db = $this->open();
-        $this->ensureSchema($db);
-
         $key = $this->primary();
         $identifier = $key ? ($this->_data[$key] ?? null) : null;
-        $record = $this->writableData();
+        $result = null;
+        $statement = null;
+        $transaction = false;
+        $insertedId = null;
+        $db->enableExceptions(true);
 
-        if ($identifier !== null && $this->exists($db, $identifier)) {
-            $assignments = [];
-            foreach (array_keys($record) as $field) {
-                if ($field === $key) {
-                    continue;
-                }
-                $assignments[] = sprintf('`%s` = :%s', $field, $field);
+        try {
+            $this->ensureSchema($db);
+            if (!$db->exec('BEGIN IMMEDIATE')) {
+                throw new \RuntimeException('SQLite model write transaction could not begin.');
             }
+            $transaction = true;
+            $record = $this->writableData();
 
-            $this->_query = sprintf(
-                'UPDATE `%s` SET %s WHERE `%s` = :__key',
-                $this->config('name'),
-                implode(', ', $assignments),
-                $key
-            );
-
-            $statement = $db->prepare($this->_query);
-            foreach ($record as $field => $value) {
-                if ($field === $key) {
-                    continue;
-                }
-                $statement->bindValue(':' . $field, $value, $this->sqliteType($value));
-            }
-            $statement->bindValue(':__key', $identifier, SQLITE3_INTEGER);
-            $result = $statement->execute();
-        } else {
-            $columns = [];
-            $placeholders = [];
-
-            foreach ($record as $field => $value) {
-                if ($field === $key && $value === null) {
-                    continue;
+            if ($identifier !== null && $this->exists($db, $identifier)) {
+                $assignments = [];
+                foreach (array_keys($record) as $field) {
+                    if ($field === $key) {
+                        continue;
+                    }
+                    $assignments[] = sprintf('`%s` = :%s', $field, $field);
                 }
 
-                $columns[] = sprintf('`%s`', $field);
-                $placeholders[] = ':' . $field;
-            }
+                $this->_query = sprintf(
+                    'UPDATE `%s` SET %s WHERE `%s` = :__key',
+                    $this->config('name'),
+                    implode(', ', $assignments),
+                    $key
+                );
 
-            $this->_query = sprintf(
-                'INSERT INTO `%s` (%s) VALUES (%s)',
-                $this->config('name'),
-                implode(', ', $columns),
-                implode(', ', $placeholders)
-            );
-
-            $statement = $db->prepare($this->_query);
-            foreach ($record as $field => $value) {
-                if ($field === $key && $value === null) {
-                    continue;
+                $statement = $db->prepare($this->_query);
+                foreach ($record as $field => $value) {
+                    if ($field === $key) {
+                        continue;
+                    }
+                    $statement->bindValue(':' . $field, $value, $this->sqliteType($value));
                 }
-                $statement->bindValue(':' . $field, $value, $this->sqliteType($value));
-            }
-            $result = $statement->execute();
+                $statement->bindValue(':__key', $identifier, SQLITE3_INTEGER);
+                $result = $statement->execute();
+            } else {
+                $columns = [];
+                $placeholders = [];
 
-            if ($result && $key && $identifier === null) {
-                $this->_data[$key] = $db->lastInsertRowID();
+                foreach ($record as $field => $value) {
+                    if ($field === $key && $value === null) {
+                        continue;
+                    }
+
+                    $columns[] = sprintf('`%s`', $field);
+                    $placeholders[] = ':' . $field;
+                }
+
+                $this->_query = sprintf(
+                    'INSERT INTO `%s` (%s) VALUES (%s)',
+                    $this->config('name'),
+                    implode(', ', $columns),
+                    implode(', ', $placeholders)
+                );
+
+                $statement = $db->prepare($this->_query);
+                foreach ($record as $field => $value) {
+                    if ($field === $key && $value === null) {
+                        continue;
+                    }
+                    $statement->bindValue(':' . $field, $value, $this->sqliteType($value));
+                }
+                $result = $statement->execute();
+
+                if ($result && $key && $identifier === null) {
+                    $insertedId = $db->lastInsertRowID();
+                }
             }
+
+            // RAISE(IGNORE) produces a result object without applying the write.
+            // A successful statement alone must not authorize dependent writes.
+            if (!$result || $db->changes() !== 1) {
+                throw new \RuntimeException('SQLite model write did not affect exactly one row.');
+            }
+            if (!$db->exec('COMMIT')) {
+                throw new \RuntimeException('SQLite model write commit failed.');
+            }
+            $transaction = false;
+            if ($insertedId !== null) {
+                $this->_data[$key] = $insertedId;
+            }
+            $this->_status = Storage::STATUS_SUCCESS;
+
+            return $this;
+        } catch (\Throwable $error) {
+            if ($transaction) {
+                try {
+                    if (!$db->exec('ROLLBACK')) {
+                        throw new \RuntimeException('SQLite model write rollback failed.');
+                    }
+                } catch (\Throwable) {
+                    throw new \RuntimeException('SQLite model write failed; rollback could not be verified.', 0, $error);
+                }
+            }
+            throw $error;
+        } finally {
+            if ($result instanceof \SQLite3Result) {
+                $result->finalize();
+            }
+            if ($statement instanceof \SQLite3Stmt) {
+                $statement->close();
+            }
+            $db->close();
         }
-
-        $this->_status = $result ? Storage::STATUS_SUCCESS : Storage::STATUS_FAILED;
-        if ($result instanceof \SQLite3Result) {
-            $result->finalize();
-        }
-
-        $db->close();
-
-        return $this;
     }
 
     public function read()
