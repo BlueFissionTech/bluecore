@@ -88,3 +88,37 @@ The optional PDO SQLite probe skips when that driver is absent. No service or
 dependency installation is needed. Legacy defaults and model public return
 shapes must remain compatible unless a separately reviewed migration says
 otherwise. No live schema change, release, activation or merge is authorized.
+
+## Installed-link fixture handoff
+
+`SQLiteLinkContextBoundaryTest` adds executable controls against the installed
+DevElation API without proposing new callable signatures. Run:
+
+```sh
+php vendor/bin/phpunit --do-not-cache-result tests/BlueCore/Model/SQLiteLinkContextBoundaryTest.php
+```
+
+These tests intentionally assert today's limitations. They must not be used as
+passing acceptance for a future context. In particular:
+
+| Fixture | Installed observation | Required owner-context acceptance |
+| --- | --- | --- |
+| Missing database | Default `open()` creates a writable file | Explicit read-only open fails without creating files; existing-file reads cannot write or run implicit DDL |
+| Two links / two tables | Path pooling shares a native transaction; commit and rollback survive reopen | Owner-supplied context identity is preserved by every model activation, including relations; no implicit commit or replacement connection |
+| Last-link exit | A retained raw `connection()` handle is closed | Exiting a borrowed adapter leaves the owner's handle and transaction alive; only the owner ends them |
+| Ignored insertion | Successful query status with zero affected rows | Required-write receipts reject missing rows and preserve the original failure evidence |
+| Aborted insertion | Fluent query returns normally with failed result/status | Strict mode exposes failure deterministically and cannot be mistaken for committed success |
+
+DevElation issue #303 owns noncreating read-only access, strict failure and
+borrowed lifetime; #274 owns generic transaction/affected-row/concurrency
+semantics; #300 owns explicit scaffold DDL context; #290 owns cursor/result
+lifetime. Owner implementation must map these observations to its reviewed API
+before BlueCore binds multiple models. Native SQLite calls in these tests are
+disposable-fixture controls, not a second production transaction engine.
+
+Additional acceptance remains necessary: deny writes to an existing read-only
+database, preserve injected context during activation, nested transaction
+ownership, failed commit/rollback recovery, result cleanup and concurrent
+readback. A successful sequential readback is not a locked snapshot, durable
+completion marker or permission to automatically retry/repair a partial unit.
+No released ref or dependency adoption is certified by this preparation.
