@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "ac2f5ed79df53ac71cc173440b1abb2b",
+    "content-hash": "0802ec144da3f19086e2cb373ca77acc",
     "packages": [
         {
             "name": "bluefission/develation",
-            "version": "v1.3.44",
+            "version": "v1.3.47",
             "source": {
                 "type": "git",
                 "url": "https://github.com/BlueFissionTech/develation.git",
-                "reference": "096a10250164227662134f996f6ddd083605a5c7"
+                "reference": "4b9079b8b34010ddd5e0f92774ae9abafbe9ea77"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/BlueFissionTech/develation/zipball/096a10250164227662134f996f6ddd083605a5c7",
-                "reference": "096a10250164227662134f996f6ddd083605a5c7",
+                "url": "https://api.github.com/repos/BlueFissionTech/develation/zipball/4b9079b8b34010ddd5e0f92774ae9abafbe9ea77",
+                "reference": "4b9079b8b34010ddd5e0f92774ae9abafbe9ea77",
                 "shasum": ""
             },
             "require": {
@@ -80,7 +80,7 @@
                 "issues": "https://github.com/BlueFissionTech/develation/issues",
                 "source": "https://github.com/BlueFissionTech/develation"
             },
-            "time": "2026-08-31T20:50:17+00:00"
+            "time": "2026-10-12T19:12:10+00:00"
         },
         {
             "name": "composer/installers",

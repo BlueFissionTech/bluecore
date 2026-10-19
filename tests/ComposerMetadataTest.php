@@ -52,7 +52,7 @@ final class ComposerMetadataTest extends TestCase
     {
         $composer = $this->composer();
 
-        $this->assertSame('^1.3.44', $composer['require']['bluefission/develation']);
+        $this->assertSame('^1.3.47', $composer['require']['bluefission/develation']);
     }
 
     public function testPackageArchiveExcludesDevelopmentFiles(): void
