@@ -7,6 +7,7 @@ use BlueFission\Data\Storage\{Session, Storage};
 use BlueFission\BlueCore\Auth as Authenticator;
 use BlueFission\Services\Application as App;
 use BlueFission\Net\HTTP;
+use Throwable;
 
 /**
  * AuthenticationGateway class for processing authentication request and managing session
@@ -39,16 +40,26 @@ class AuthenticationGateway extends Gateway {
 	 */
 	public function process( Request $request, &$arguments )
 	{
-		$auth = $this->_authenticator ?? App::makeInstance(Authenticator::class);
-
-		if ( $auth->isAuthenticated() ) {
-			$auth->setSession();
-		} else {
-			$auth->destroySession();
-			$this->redirect();
-
-			throw new GatewayDenied('Authentication required.', 302);
+		$auth = null;
+		$failure = null;
+		try {
+			$auth = $this->_authenticator ?? App::makeInstance(Authenticator::class);
+			if ($auth->isAuthenticated() && $auth->setSession() === true) {
+				return;
+			}
+		} catch (Throwable $exception) {
+			$failure = $exception;
 		}
+
+		// Cleanup must never turn denied or indeterminate authentication into dispatch.
+		try {
+			$auth?->destroySession();
+		} catch (Throwable $exception) {
+			$failure ??= $exception;
+		}
+
+		$this->redirect();
+		throw new GatewayDenied('Authentication required.', 302, $failure);
 	}
 
 	/**

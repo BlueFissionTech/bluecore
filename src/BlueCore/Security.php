@@ -8,7 +8,7 @@ class Security {
     public static function init() {
         self::$_appKey = getenv('APP_KEY');
         if (!self::$_appKey) {
-            throw new Exception('Application key not set.');
+            throw new \RuntimeException('Application key not set.');
         }
     }
 
