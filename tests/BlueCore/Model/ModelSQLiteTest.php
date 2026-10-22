@@ -104,6 +104,131 @@ class ModelSQLiteTest extends TestCase
         $this->assertSame(Storage::STATUS_SUCCESS, $diagnostics['status']);
         $this->assertSame(1, $diagnostics['rowCount']);
     }
+
+    public function testIgnoredInsertFailsWithoutPublishingIdAndSameModelCanRetry(): void
+    {
+        $seed = new TestSQLiteModel($this->database);
+        $seed->write(['name' => 'seed']);
+        $db = new \SQLite3($this->database);
+        $db->exec("CREATE TRIGGER deny_insert BEFORE INSERT ON test_records BEGIN SELECT RAISE(IGNORE); END");
+        $writer = new TestSQLiteModel($this->database);
+        try {
+            $writer->write(['name' => 'retry']);
+            $this->fail('Ignored insert must throw.');
+        } catch (\RuntimeException $error) {
+            $this->assertStringContainsString('exactly one row', $error->getMessage());
+        }
+        $this->assertSame(Storage::STATUS_FAILED, $writer->status());
+        $this->assertNull($writer->id());
+        $this->assertSame(1, $db->querySingle('SELECT count(*) FROM test_records'));
+        $db->exec('DROP TRIGGER deny_insert');
+        $this->assertSame($writer, $writer->write(['name' => 'retry']));
+        $this->assertSame(Storage::STATUS_SUCCESS, $writer->status());
+        $this->assertSame(2, $db->querySingle('SELECT count(*) FROM test_records'));
+        $db->close();
+    }
+
+    public function testIgnoredUpdateRollsBackTriggerHistoryAndAcceptedNoOpCanRetry(): void
+    {
+        $writer = new TestSQLiteModel($this->database);
+        $writer->write(['name' => 'record', 'status' => 'draft']);
+        $id = $writer->id();
+        $db = new \SQLite3($this->database);
+        $db->exec('CREATE TABLE history (id INTEGER PRIMARY KEY, state TEXT)');
+        $db->exec("CREATE TRIGGER deny_update BEFORE UPDATE ON test_records BEGIN INSERT INTO history(state) VALUES ('active'); SELECT RAISE(IGNORE); END");
+        try {
+            $writer->write(['record_id' => $id, 'name' => 'record', 'status' => 'active']);
+            $this->fail('Ignored update must throw.');
+        } catch (\RuntimeException) {
+            $this->assertSame(Storage::STATUS_FAILED, $writer->status());
+        }
+        $this->assertSame('draft', $db->querySingle('SELECT status FROM test_records'));
+        $this->assertSame(0, $db->querySingle('SELECT count(*) FROM history'));
+        $db->exec('DROP TRIGGER deny_update');
+        $writer->write(['record_id' => $id, 'name' => 'record', 'status' => 'draft']);
+        $this->assertSame(Storage::STATUS_SUCCESS, $writer->status());
+        $this->assertSame(1, $db->querySingle('SELECT count(*) FROM test_records'));
+        $db->close();
+    }
+
+    public function testAbortedWriteRollsBackHistorySideEffectsAndReopenRetryWorks(): void
+    {
+        $writer = new TestSQLiteModel($this->database);
+        $writer->write(['name' => 'record', 'status' => 'draft']);
+        $id = $writer->id();
+        $db = new \SQLite3($this->database);
+        $db->exec('CREATE TABLE history (id INTEGER PRIMARY KEY, state TEXT)');
+        $db->exec("CREATE TRIGGER deny_update BEFORE UPDATE ON test_records BEGIN INSERT INTO history(state) VALUES ('active'); SELECT RAISE(FAIL, 'blocked'); END");
+        try {
+            $writer->write(['record_id' => $id, 'status' => 'active']);
+            $this->fail('Aborted update must throw.');
+        } catch (\Exception $error) {
+            $this->assertStringContainsString('blocked', $error->getMessage());
+        }
+        $this->assertSame(Storage::STATUS_FAILED, $writer->status());
+        $this->assertSame('draft', $db->querySingle('SELECT status FROM test_records'));
+        $this->assertSame(0, $db->querySingle('SELECT count(*) FROM history'));
+        $db->exec('DROP TRIGGER deny_update');
+        $reopened = new TestSQLiteModel($this->database);
+        $reopened->write(['record_id' => $id, 'name' => 'record', 'status' => 'active']);
+        $this->assertSame('active', $db->querySingle('SELECT status FROM test_records'));
+        $db->close();
+    }
+
+    public function testSeparateHistoryFailureDoesNotPretendToRollBackCommittedModel(): void
+    {
+        $writer = new TestSQLiteModel($this->database);
+        $writer->write(['name' => 'record', 'status' => 'active']);
+        $db = new \SQLite3($this->database);
+        $db->exec('CREATE TABLE history (id INTEGER PRIMARY KEY, state TEXT)');
+        $db->exec("CREATE TRIGGER deny_history BEFORE INSERT ON history BEGIN SELECT RAISE(IGNORE); END");
+        $history = new SQLiteModelStore(['location' => $this->database, 'name' => 'history', 'fields' => ['id', 'state']]);
+        $history->field('state', 'active');
+        try {
+            $history->write();
+            $this->fail('Ignored history must throw.');
+        } catch (\RuntimeException) {
+            $this->assertSame(Storage::STATUS_FAILED, $history->status());
+        }
+        $this->assertSame('active', $db->querySingle('SELECT status FROM test_records'));
+        $this->assertSame(0, $db->querySingle('SELECT count(*) FROM history'));
+        $db->exec('DROP TRIGGER deny_history');
+        $history->write();
+        $this->assertSame(1, $db->querySingle('SELECT count(*) FROM history'));
+        $db->close();
+    }
+
+    public function testCommitAndRollbackFailuresRetainFailedStatusAndOriginalCause(): void
+    {
+        $config = ['location' => $this->database, 'name' => 'records', 'fields' => ['id', 'value']];
+        $store = new class($config) extends SQLiteModelStore {
+            protected function open(): \SQLite3
+            {
+                return new class($this->config('location')) extends \SQLite3 {
+                    public function exec(string $query): bool
+                    {
+                        if ($query === 'COMMIT' || $query === 'ROLLBACK') {
+                            return false;
+                        }
+                        return parent::exec($query);
+                    }
+                };
+            }
+        };
+        $store->field('value', 'pending');
+        try {
+            $store->write();
+            $this->fail('Unverified commit/rollback must throw.');
+        } catch (\RuntimeException $error) {
+            $this->assertStringContainsString('rollback could not be verified', $error->getMessage());
+            $this->assertSame('SQLite model write commit failed.', $error->getPrevious()?->getMessage());
+        }
+        $this->assertSame(Storage::STATUS_FAILED, $store->status());
+        $this->assertNull($store->field('id'));
+        $db = new \SQLite3($this->database);
+        $this->assertSame(0, $db->querySingle('SELECT count(*) FROM records'));
+        $db->close();
+    }
 }
 
 class TestSQLiteModel extends ModelSQLite

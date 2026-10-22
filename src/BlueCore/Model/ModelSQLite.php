@@ -96,19 +96,17 @@ class ModelSQLite extends BaseModel
         }
 
         $this->_dataObject->config('fields', $this->_fields);
-        $result = parent::write($values);
-
-        if ($forceCreatedTimestamp) {
-            $this->removeField('created');
+        try {
+            return parent::write($values);
+        } finally {
+            if ($forceCreatedTimestamp) {
+                $this->removeField('created');
+            }
+            if ($forceUpdatedTimestamp) {
+                $this->removeField('updated');
+            }
+            $this->_dataObject->config('fields', $this->_fields);
         }
-
-        if ($forceUpdatedTimestamp) {
-            $this->removeField('updated');
-        }
-
-        $this->_dataObject->config('fields', $this->_fields);
-
-        return $result;
     }
 
     public function condition($field, $condition = '', $value = '')
