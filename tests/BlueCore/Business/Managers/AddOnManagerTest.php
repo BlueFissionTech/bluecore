@@ -1102,6 +1102,32 @@ PHP,
         $this->assertSame([], $model->deletes);
     }
 
+    public function testFailedRevertReceiptPreservesRegistrationAndRecoveryAction(): void
+    {
+        $this->writeDefinition('demo');
+        $path = self::$root . DIRECTORY_SEPARATOR . 'addons' . DIRECTORY_SEPARATOR . 'demo';
+        $model = new FakeAddOnModel([(object)[
+            'addon_id' => 8, 'name' => 'demo', 'path' => $path,
+            'primary_file' => 'main.php', 'is_active' => 1,
+        ]]);
+        $datasource = new FakeDatasourceManager();
+        $datasource->revertReceipt = [
+            'ok' => false, 'changed' => true, 'stage' => 'partial',
+            'error' => 'History cleanup failed.', 'nextAction' => 'reconcile_migration_history',
+        ];
+        $manager = new TestableAddOnManager($model, $datasource);
+
+        $result = $manager->uninstall(8);
+
+        $this->assertFalse($result['ok']);
+        $this->assertTrue($result['changed']);
+        $this->assertSame('datasource', $result['stage']);
+        $this->assertSame('reconcile_migration_history', $result['nextAction']);
+        $this->assertSame($datasource->revertReceipt, $result['datasource']);
+        $this->assertCount(1, $model->records);
+        $this->assertSame([], $model->deletes);
+    }
+
     public function testSuccessfulTeardownRemovesRegistrationLast(): void
     {
         $this->writeDefinition('demo');
@@ -1365,6 +1391,7 @@ class FakeAddOnModel
 
 class FakeDatasourceManager
 {
+    public ?array $revertReceipt = null;
     public int $migrationRuns = 0;
     public int $populationRuns = 0;
     public array $deltaDirectories = [];
@@ -1496,10 +1523,11 @@ class FakeDatasourceManager
         ];
     }
 
-    public function revertBatch(string $batch): void
+    public function revertBatch(string $batch): ?array
     {
         if ($this->failRollback) {
             throw new \RuntimeException('Datasource rollback failed.');
         }
+        return $this->revertReceipt;
     }
 }

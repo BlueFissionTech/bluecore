@@ -217,77 +217,191 @@ class DatasourceManager extends Service {
 		);
 	}
 
-	public function revertMigrations()
+	public function revertMigrations(): array
 	{
-		$iteration = 1;
-		$deltas = $this->getDeltasFromDB($iteration);
+		return $this->revertHistory(null, true);
+	}
 
-		if ( empty($deltas) && !file_exists($this->_deltaDir) ) {
-			return;
+	public function revertBatch($batch): array
+	{
+		if (Val::isEmpty($batch) || Val::isEmpty(Str::trim((string)$batch))) {
+			return $this->revertReceipt('revert_batch', null, 'invalid_batch', false);
 		}
 
-		if ( empty($deltas) ) {
-			$deltas = $this->loadDeltas(1);
-		}
+		return $this->revertHistory(Str::trim((string)$batch), false);
+	}
 
-		foreach ( $deltas as $delta ) {
-			$classname = '';
-			if ( strpos($delta, '.') != 0 ) {
-				$classname = $this->findClassName( $this->_deltaDir . $delta );
-				if ( $classname ) {
-					include_once($this->_deltaDir . $delta);
-					// $object = new $classname();
-					$object = \App::makeInstance($classname);
-					$this->_db->clear();
-					try {
-						call_user_func([$object, 'revert']);
-					} catch ( \Exception $e ) {
-						throw new Exception("Error reverting migration: {$delta}. " . $e->getMessage());
-					} finally {
-						$this->_db->assign([
-							'name' => $delta,
-							'iteration' => $iteration,
-						])->delete();
-					}
-				}
+	private function revertHistory(?string $batch, bool $latestOnly): array
+	{
+		$result = $this->revertReceipt($latestOnly ? 'revert_migrations' : 'revert_batch', $batch);
+		try {
+			if (!$this->migrationTableExists()) {
+				$result['reason'] = 'no_history';
+				return $result;
 			}
+			$records = $this->revertRecords($this->loadRevertHistory($batch), $batch, $latestOnly);
+		} catch (\Throwable $exception) {
+			return $this->revertDiscoveryFailure($result, $exception);
+		}
+
+		$result['total'] = Arr::size($records);
+		if ($records === []) {
+			$result['reason'] = 'empty_history';
+			return $result;
+		}
+		$result['iteration'] = $records[0]['iteration'];
+		try {
+			if (!$this->deltaDirectoryExists()) {
+				$result['ok'] = false;
+				$result['stage'] = 'unavailable';
+				$result['reason'] = 'missing_directory';
+				$result['nextAction'] = 'restore_migration_directory';
+				return $result;
+			}
+		} catch (\Throwable $exception) {
+			return $this->revertDiscoveryFailure($result, $exception);
+		}
+
+		foreach ($records as $record) {
+			$outcome = $record + [
+				'ok' => false, 'status' => 'not_attempted', 'reverted' => false,
+				'historyRemoved' => false, 'error' => null, 'exception' => null,
+			];
+			if (!$result['ok']) {
+				$result['results'][] = $outcome;
+				$result['unattempted']++;
+				continue;
+			}
+
+			try {
+				$path = $this->_deltaDir . $record['name'];
+				$classname = $this->findClassName($path);
+				if (Val::isEmpty($classname)) {
+					$outcome['status'] = 'missing_class';
+					throw new \RuntimeException('Migration class could not be resolved.');
+				}
+				$this->includeMigration($path);
+				$object = $this->migrationInstance($classname);
+				if (!Func::isCallable([$object, 'revert'])) {
+					throw new \RuntimeException('Migration class must expose revert().');
+				}
+				Func::make([$object, 'revert'])->call();
+				$outcome['reverted'] = true;
+				$result['reverted']++;
+				$result['changed'] = true;
+				$outcome['status'] = 'history_cleanup_failed';
+				$this->deleteRevertHistory($record);
+				$outcome['historyRemoved'] = true;
+				$outcome['ok'] = true;
+				$outcome['status'] = 'reverted';
+			} catch (\Throwable $exception) {
+				if ($outcome['status'] === 'not_attempted') {
+					$outcome['status'] = 'failed';
+				}
+				$outcome['error'] = $exception->getMessage();
+				$outcome['exception'] = $exception::class;
+				$result['ok'] = false;
+				$result['failed']++;
+				$result['error'] = $exception->getMessage();
+				$result['exception'] = $exception::class;
+				$result['stage'] = $result['changed'] ? 'partial' : 'revert';
+				$result['nextAction'] = $outcome['reverted']
+					? 'reconcile_migration_history' : 'review_revert_failure';
+			}
+			$result['results'][] = $outcome;
+		}
+		$result['reason'] = null;
+		$result['stage'] = $result['ok'] ? 'complete' : $result['stage'];
+		return $result;
+	}
+
+	protected function loadRevertHistory(?string $batch): array
+	{
+		$this->_db->config('name', 'migrations');
+		$this->_db->activate();
+		$this->_db->clear();
+		if ($batch !== null) {
+			$this->_db->where('batch', $batch);
+		}
+		$this->_db->order('iteration', 'DESC')->order('migration_id', 'DESC')->read();
+		if ($this->_db->status() !== Storage::STATUS_SUCCESS) {
+			throw new \RuntimeException('Migration history could not be read.');
+		}
+		return $this->_db->result()->toArray();
+	}
+
+	private function revertRecords(array $rows, ?string $batch, bool $latestOnly): array
+	{
+		$records = Arr::make([]);
+		foreach ($rows as $row) {
+			if ((int)$this->migrationField($row, 'status', 0) !== 2) {
+				continue;
+			}
+			$rowBatch = (string)$this->migrationField($row, 'batch', '');
+			if ($batch !== null && $rowBatch !== $batch) {
+				continue;
+			}
+			$name = $this->migrationField($row, 'name');
+			$iteration = (int)$this->migrationField($row, 'iteration', 0);
+			if (!Str::is($name) || $name === '' || basename($name) !== $name
+				|| strpbrk($name, "/\\\0") !== false || $name[0] === '.' || $iteration < 1 || $rowBatch === '') {
+				throw new \UnexpectedValueException('Successful migration history contains an invalid record.');
+			}
+			$records->push([
+				'name' => $name, 'batch' => $rowBatch, 'iteration' => $iteration,
+				'migrationId' => $this->migrationField($row, 'migration_id'),
+			]);
+		}
+		$records = $records->sort(fn ($left, $right) =>
+			($right['iteration'] <=> $left['iteration'])
+			?: ((int)$right['migrationId'] <=> (int)$left['migrationId'])
+			?: strcmp($right['name'], $left['name']))
+			->values();
+		if ($latestOnly && $records->isNotEmpty()) {
+			$iteration = Arr::getPath($records->toArray(), '0.iteration');
+			$records = $records
+				->filter(fn ($row) => $row['iteration'] === $iteration)
+				->values();
+		}
+		return $records->toArray();
+	}
+
+	protected function deleteRevertHistory(array $record): void
+	{
+		$this->_db->clear();
+		$selector = [
+			'name' => $record['name'], 'batch' => $record['batch'],
+			'iteration' => $record['iteration'], 'status' => 2,
+		];
+		if ($record['migrationId'] !== null) {
+			$selector['migration_id'] = $record['migrationId'];
+		}
+		$this->_db->assign($selector)->delete();
+		if ($this->_db->status() !== Storage::STATUS_SUCCESS) {
+			throw new \RuntimeException('Revert succeeded but migration history could not be removed.');
 		}
 	}
 
-	public function revertBatch($batch)
+	private function revertReceipt(string $operation, ?string $batch, ?string $reason = null, bool $ok = true): array
 	{
-		$this->_db->config('name', 'migrations');
-		$this->_db->clear();
-		$this->_db->where('batch', $batch)
-			->order('iteration', 'DESC')
-			->read();
+		return Arr::make([
+			'operation' => $operation, 'batch' => $batch, 'iteration' => null,
+			'ok' => $ok, 'changed' => false, 'stage' => $ok ? 'complete' : 'discovery',
+			'total' => 0, 'reverted' => 0, 'failed' => 0, 'unattempted' => 0,
+			'results' => [], 'reason' => $reason, 'error' => null, 'exception' => null,
+			'nextAction' => $ok ? null : 'review_revert_request',
+		])->toArray();
+	}
 
-		$iteration = $this->_db->result()->first()->iteration ?: 1;
-		$deltas = $this->_db->result()->map(function($row) {
-			return $row->delta;
-		})->toArray();
-
-		foreach ( $deltas as $delta ) {
-			$classname = '';
-			if ( strpos($delta, '.') != 0 ) {
-				$classname = $this->findClassName( $this->_deltaDir . $delta );
-				if ( $classname ) {
-					include_once($this->_deltaDir . $delta);
-					// $object = new $classname();
-					$object = \App::makeInstance($classname);
-					try {
-						call_user_func([$object, 'revert']);
-					} catch ( \Exception $e ) {
-						throw new Exception("Error reverting migration: {$delta}. " . $e->getMessage());
-					} finally {
-						$this->_db->assign([
-							'name' => $delta,
-							'iteration' => $iteration,
-						])->delete();
-					}
-				}
-			}
-		}
+	private function revertDiscoveryFailure(array $result, \Throwable $exception): array
+	{
+		$result['ok'] = false;
+		$result['stage'] = 'discovery';
+		$result['failed'] = 1;
+		$result['error'] = $exception->getMessage();
+		$result['exception'] = $exception::class;
+		$result['nextAction'] = 'review_migration_history';
+		return $result;
 	}
 
 	public function populate($auto = false): array

@@ -181,7 +181,21 @@ class AddOnManager extends Service implements IAddOnLifecycleManager
             $datasource = $this->datasourceManager();
             $datasource->setDeltaDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'structure' . DIRECTORY_SEPARATOR);
             $datasource->setGeneratorDirectory($addon->path . DIRECTORY_SEPARATOR . 'datasources' . DIRECTORY_SEPARATOR . 'generator' . DIRECTORY_SEPARATOR);
-            $result['messages'][] = $this->captureOutput(fn() => $datasource->revertBatch($addon->name));
+            $revertResult = null;
+            $result['messages'][] = $this->captureOutput(function () use ($datasource, $addon, &$revertResult): void {
+                $revertResult = $datasource->revertBatch($addon->name);
+            });
+            if (Arr::is($revertResult)) {
+                $result['datasource'] = $revertResult;
+                $result['changed'] = Flag::parseBool(Arr::getPath($revertResult, 'changed', false));
+                if (Flag::isFalse(Arr::getPath($revertResult, 'ok', false))) {
+                    $result['ok'] = false;
+                    $result['error'] = Arr::getPath($revertResult, 'error') ?? 'Datasource revert did not complete.';
+                    $result['nextAction'] = Arr::getPath($revertResult, 'nextAction') ?? 'review_revert_failure';
+                    $result['modelStatus'] = $this->_model->status();
+                    return $result;
+                }
+            }
 
             $result['stage'] = 'registration';
             $this->_model->delete(['addon_id' => $addOnId]);
