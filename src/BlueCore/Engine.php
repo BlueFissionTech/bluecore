@@ -2,6 +2,7 @@
 namespace BlueFission\BlueCore;
 
 use BlueFission\Services\Application;
+use BlueFission\Services\Mapping;
 use BlueFission\Services\Service;
 use BlueFission\Services\Response;
 use BlueFission\Behavioral\Behaviors\Event;
@@ -93,6 +94,8 @@ class Engine extends Application {
 	private array $_activeHookDepths = [];
 
 	private array $_hookDepthLimits = [];
+
+	private bool $_mappingsDiscovered = false;
 
 	public function __construct($config = [])
 	{
@@ -252,6 +255,11 @@ class Engine extends Application {
 	 * @return Engine
 	 */
 	public function bootstrap() {
+		return Mapping::withApplication($this, fn () => $this->bootstrapInMappingContext());
+	}
+
+	private function bootstrapInMappingContext(): self
+	{
 		$this->dispatchHook(self::HOOK_BOOTSTRAP_BEFORE, [$this]);
 
 		try {
@@ -271,7 +279,7 @@ class Engine extends Application {
 
 			$this->assetDir(store('asset_dir'));
 
-			$this->_session = instance('session');
+			$this->_session = $this->service('session');
 		} catch (Throwable $exception) {
 			$this->dispatchFailureHook(self::HOOK_BOOTSTRAP_FAILED, 'bootstrap', $exception);
 			throw $exception;
@@ -399,7 +407,12 @@ class Engine extends Application {
 	 * @return void
 	 */
 	private function autoDiscoverMapping() {
-		$this->_loader->load("mapping.*");
+		if ($this->_mappingsDiscovered) {
+			return;
+		}
+
+		$this->_loader->load("mapping.*", false);
+		$this->_mappingsDiscovered = true;
 	}
 
 	/**
