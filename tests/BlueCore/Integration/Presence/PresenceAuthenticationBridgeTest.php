@@ -7,6 +7,7 @@ namespace {
 }
 
 namespace BlueFission\Tests\BlueCore\Integration\Presence {
+    use BlueFission\Tests\Support\PhpSubprocess;
     use BlueFission\Arr;
     use BlueFission\BlueCore\Integration\Presence\PresenceAuthenticationBridge;
     use BlueFission\BlueCore\Integration\Presence\PresenceBridgeFactory;
@@ -117,7 +118,7 @@ namespace BlueFission\Tests\BlueCore\Integration\Presence {
                 . DIRECTORY_SEPARATOR . 'Fixtures'
                 . DIRECTORY_SEPARATOR . 'presence-bridge-unavailable.php'
             );
-            $command = Str::make(escapeshellarg(PHP_BINARY))
+            $command = Str::make(PhpSubprocess::command())
                 ->append(' ')
                 ->append(escapeshellarg($fixture))
                 ->val();

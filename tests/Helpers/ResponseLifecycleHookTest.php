@@ -2,6 +2,8 @@
 
 namespace BlueFission\Tests\Helpers;
 
+use BlueFission\Tests\Support\PhpSubprocess;
+
 use BlueFission\Str;
 use BlueFission\System\Process;
 use BlueFission\Utils\Path;
@@ -47,7 +49,7 @@ class ResponseLifecycleHookTest extends TestCase
             . DIRECTORY_SEPARATOR
             . 'response-lifecycle-hooks.php'
         );
-        $command = Str::make(escapeshellarg(PHP_BINARY))
+        $command = Str::make(PhpSubprocess::command())
             ->append(' ')
             ->append(escapeshellarg($fixture))
             ->append(' ')
