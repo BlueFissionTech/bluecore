@@ -2,6 +2,8 @@
 
 namespace BlueFission\Tests\Helpers;
 
+use BlueFission\Tests\Support\PhpSubprocess;
+
 use BlueFission\Arr;
 use BlueFission\BlueCore\Hooks\HelperLifecycleHooks;
 use BlueFission\DevElation as Dev;
@@ -54,7 +56,7 @@ class ProductionErrorHandlerTest extends TestCase
         $root = Path::normalize(dirname(__DIR__, 2));
         $fixture = Path::normalize($root . DIRECTORY_SEPARATOR . 'tests' . DIRECTORY_SEPARATOR . 'Fixtures' . DIRECTORY_SEPARATOR . 'runtime-unhandled-exception.php');
         $errorLog = Path::normalize(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'bluecore-error-' . Str::rand('', 10) . '.log');
-        $command = Str::make(escapeshellarg(PHP_BINARY))
+        $command = Str::make(PhpSubprocess::command())
             ->append(' ')
             ->append(escapeshellarg($fixture))
             ->val();
@@ -179,7 +181,7 @@ class ProductionErrorHandlerTest extends TestCase
         $evidencePath = Path::normalize(
             sys_get_temp_dir() . DIRECTORY_SEPARATOR . "bluecore-shutdown-evidence-{$token}.json"
         );
-        $command = Str::make(escapeshellarg(PHP_BINARY))
+        $command = Str::make(PhpSubprocess::command())
             ->append(' -d ')
             ->append(escapeshellarg('display_errors=' . ($debug ? '1' : '0')))
             ->append(' ')

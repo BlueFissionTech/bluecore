@@ -2,6 +2,8 @@
 
 namespace BlueFission\Tests\BlueCore;
 
+use BlueFission\Tests\Support\PhpSubprocess;
+
 use BlueFission\Arr;
 use BlueFission\Str;
 use BlueFission\System\Process;
@@ -65,7 +67,7 @@ class ThemeDirectoryResolutionTest extends TestCase
             . DIRECTORY_SEPARATOR . 'Fixtures'
             . DIRECTORY_SEPARATOR . 'theme-directory-resolution.php'
         );
-        $command = Str::make(escapeshellarg(PHP_BINARY))
+        $command = Str::make(PhpSubprocess::command())
             ->append(' ')
             ->append(escapeshellarg($fixture))
             ->append(' ')
