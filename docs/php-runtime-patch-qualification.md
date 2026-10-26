@@ -3,7 +3,8 @@
 Status: **unknown / not qualified**. This is an evidence-only plan for
 [issue #108](https://github.com/BlueFissionTech/bluecore/issues/108), not a runtime
 upgrade, security attestation, release approval, or change to the PHP `>=8.2`
-support floor. Evidence was collected on 2026-10-22.
+support floor. Initial evidence was collected on 2026-10-22; configuration/build
+follow-up is dated 2026-10-26.
 
 ## Source and target
 
@@ -30,7 +31,9 @@ audit. Coordinate operational qualification separately through the
 | Legacy nested Dockerfile | `docker/php/php/Dockerfile`, floating `php:8.2-fpm` | Owner-selected fixed image if still used | Unknown; not selected by `docker/compose.lib.yml`; usage unverified |
 | Deployed web runtimes | No verified inventory | Owner-selected same-minor fixed build | Unknown; host owner must identify inventory and exposure; not N/A |
 
-These target versions are advisory candidates, not versions executed here.
+The table records the initial October 22 inventory; the follow-up below records
+later, separately scoped offline execution. These initial target rows are not
+current fleet qualification.
 Neither version constraints nor green tests on an unidentified floating image
 establish that a security-fixed build was used. BlueCore is a framework package,
 not the owner of deployed host configuration or production rollout.
@@ -150,8 +153,62 @@ Returning an exposed service to a known vulnerable PHP build is not an automatic
 rollback. No database rollback, destructive cleanup, provider change, credential
 change, restart or traffic switch is authorized by this document.
 
-The current next decision is approval of an isolated fixed-runtime test target
-and its provisioning owner, not approval to deploy or change the support floor.
+The next decisions are approval of exact Windows-rebuild qualification and
+host-owned session-configuration applicability review, not permission to deploy
+or change the support floor.
 Known consumer observations must be tracked as owner attestations with their own
 source/lock/build and results; an incomplete consumer inventory stays an explicit
 coverage gap rather than an assertion of ecosystem-wide compatibility.
+
+## Configuration and Windows-build follow-up (2026-10-26)
+
+The initial inventory and failed runner attempts above are dated observations,
+not the current extent of offline evidence. Keep their diagnostics; do not
+reinterpret a later test against different source as that original baseline.
+
+The PHP team's [session advisory](https://www.php.net/archive/2026.php#2026-10-23-1)
+describes CVE-2026-115560: a configured `php_binary` or `php_serialize` handler is
+changed to `php` before `session_start()`, with upload progress enabled. The
+October 21 fixes do not establish coverage of this later issue. PHP recommends
+`session.upload_progress.enabled=0` pending its regular fix; this plan does not
+apply that setting or restart workers.
+
+The [October 26 Windows rebuild announcement](https://www.php.net/archive/2026.php)
+identifies packages 8.2.35-1, 8.3.36-1, 8.4.27-1 and 8.5.12-1 with Brotli 1.2.1
+for CVE-2026-111497. PHP runtime version strings do not change. The relevant
+Windows cURL path requires automatic response decompression; its default being
+disabled is not proof that an application or client library never enables it.
+
+Extend the existing qualification record, rather than starting another rollout:
+
+- **Runtime owner:** record archive filename, published checksum, executable
+  checksum, TS/NTS, architecture, vendor rebuild identity, linked cURL/Brotli
+  versions and loaded extensions. Do not certify a rebuild from `php --version`
+  alone or replace individual bundled DLLs.
+- **Host owner:** capture effective configuration for every serving SAPI before
+  request processing, including pool/directory overrides. Inspect application
+  and dependency code for runtime session-handler switches before session start;
+  retain unknown applicability until both configuration and code are reviewed.
+- **Maintainer:** inspect HTTP clients' decompression configuration and decoder
+  reachability. A disabled extension in one CLI profile is not a fleet-wide N/A.
+  Any selected mitigation requires compatibility review and separate owner
+  approval; do not activate extensions or change INI settings to complete a row.
+- **Reviewer:** require exact-build, configuration and exposure evidence beside
+  compatibility results. Source tests are neither a vulnerability test nor web,
+  FPM, installed-package or production security clearance. New archives,
+  installation, activation, restarts and deployment remain separately gated.
+
+### Preserved offline compatibility evidence
+
+Approved PHP 8.2.35 CLI executable SHA-256:
+`39a2f0bc882c7aaa4281f3598f2eee3c263b631b25d2da5e9dcdad92ed27a6e6`.
+This identifies the tested executable, **not** the new Windows rebuild.
+With the approved matching mbstring, fileinfo, gd, zip, sqlite3 and pdo_sqlite
+modules, BlueCore `3661ff89281efc64c6a1f3ba0bce775fe17022cd` plus native
+DevElation `20a31b998b63bce42b37f75b26053662f307dc0c` source classes passes
+179 tests / 737 assertions. Four additional synthetic Engine/Fiber probes pass
+4 tests / 38 assertions. These latter probes are supplemental, not committed
+regressions in this plan. The source substitution is test-only; ordinary
+installed-dependency routing CI remains failing on v1.3.47. Installer parity,
+other PHP minors, serving SAPIs, new rebuilds and optional live services were
+not qualified. No dependency installation or runtime replacement occurred.
